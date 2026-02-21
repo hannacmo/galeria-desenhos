@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Desenhos da Elisa e da Gurico ✏️</title>
+  <title>Recordações de Elisa e Cecília ✏️</title>
 
   <!-- Firebase SDK -->
   <script type="module">
@@ -24,38 +24,92 @@
     const storage = getStorage(app);
     const db = getFirestore(app);
 
+    // perfis das artistas
+    const profiles = {
+      Elisa: {
+        color: "#ff7043",
+        bg: "#fff3f0",
+        emoji: "🌸",
+        desc: "Artista cheia de imaginação e alegria, a Elisa transforma cada folha em branco numa aventura colorida. Seus desenhos são cheios de vida, personagens inventados e muita, muita cor!"
+      },
+      Cecília: {
+        color: "#ba68c8",
+        bg: "#f9f0ff",
+        emoji: "🦋",
+        desc: "A Cecília tem um traço delicado e cheio de detalhes que encantam quem olha. Cada desenho dela é uma história silenciosa esperando ser descoberta — cheia de amor e de beleza."
+      }
+    };
+
+    let allDrawings = [];
+    let activeFilter = "all";
+
     // ── carrega galeria ──────────────────────────
     async function loadGallery() {
+      const q = query(collection(db, "drawings"), orderBy("createdAt", "desc"));
+      const snap = await getDocs(q);
+      allDrawings = [];
+      snap.forEach(doc => allDrawings.push(doc.data()));
+      renderGallery();
+    }
+
+    function renderGallery() {
       const grid = document.getElementById("gallery-grid");
       const empty = document.getElementById("empty-state");
       grid.innerHTML = "";
 
-      const q = query(collection(db, "drawings"), orderBy("createdAt", "desc"));
-      const snap = await getDocs(q);
+      const filtered = activeFilter === "all"
+        ? allDrawings
+        : allDrawings.filter(d => d.artist === activeFilter);
 
-      if (snap.empty) {
+      if (filtered.length === 0) {
         empty.style.display = "flex";
         return;
       }
       empty.style.display = "none";
 
-      snap.forEach((doc) => {
-        const data = doc.data();
+      filtered.forEach((data, i) => {
+        const profile = profiles[data.artist] || {};
         const card = document.createElement("div");
         card.className = "card";
-        card.style.animationDelay = `${Math.random() * 0.4}s`;
+        card.style.animationDelay = `${i * 0.06}s`;
         card.innerHTML = `
           <div class="card-img-wrap">
             <img src="${data.url}" alt="${data.title}" loading="lazy" />
+            <div class="card-artist-tag" style="background:${profile.color || '#aaa'}">${profile.emoji || '🎨'} ${data.artist}</div>
           </div>
           <div class="card-info">
-            <span class="card-artist">${data.artist}</span>
             <span class="card-title">${data.title}</span>
+            ${data.message ? `<span class="card-message">"${data.message}"</span>` : ""}
             <span class="card-date">${new Date(data.createdAt?.toDate?.() ?? data.createdAt).toLocaleDateString("pt-BR", { day:"2-digit", month:"short", year:"numeric" })}</span>
           </div>`;
-        card.querySelector("img").addEventListener("click", () => openLightbox(data.url, data.title, data.artist));
+        card.querySelector("img").addEventListener("click", () => openLightbox(data.url, data.title, data.artist, data.message));
         grid.appendChild(card);
       });
+    }
+
+    // ── filtro ───────────────────────────────────
+    function setFilter(filter) {
+      activeFilter = filter;
+
+      document.querySelectorAll(".filter-btn").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.filter === filter);
+      });
+
+      const profileBox = document.getElementById("profile-box");
+      if (filter === "all") {
+        profileBox.style.display = "none";
+      } else {
+        const p = profiles[filter];
+        profileBox.style.display = "flex";
+        profileBox.style.background = p.bg;
+        profileBox.style.borderColor = p.color;
+        document.getElementById("profile-emoji").textContent = p.emoji;
+        document.getElementById("profile-name").textContent = filter;
+        document.getElementById("profile-name").style.color = p.color;
+        document.getElementById("profile-desc").textContent = p.desc;
+      }
+
+      renderGallery();
     }
 
     // ── upload ───────────────────────────────────
@@ -64,17 +118,19 @@
       const fileInput = document.getElementById("file-input");
       const artistInput = document.getElementById("artist-input");
       const titleInput = document.getElementById("title-input");
+      const messageInput = document.getElementById("message-input");
       const btn = document.getElementById("upload-btn");
       const progressWrap = document.getElementById("progress-wrap");
       const progressBar = document.getElementById("progress-bar");
       const feedback = document.getElementById("upload-feedback");
 
       const file = fileInput.files[0];
-      const artist = artistInput.value.trim();
+      const artist = artistInput.value;
       const title = titleInput.value.trim();
+      const message = messageInput.value.trim();
 
       if (!file || !artist || !title) {
-        feedback.textContent = "Preencha todos os campos!";
+        feedback.textContent = "Preencha todos os campos obrigatórios!";
         feedback.className = "feedback error";
         return;
       }
@@ -101,7 +157,7 @@
         },
         async () => {
           const url = await getDownloadURL(task.snapshot.ref);
-          await addDoc(collection(db, "drawings"), { url, artist, title, createdAt: new Date() });
+          await addDoc(collection(db, "drawings"), { url, artist, title, message, createdAt: new Date() });
 
           feedback.textContent = "Desenho adicionado com amor! 💛";
           feedback.className = "feedback success";
@@ -112,6 +168,7 @@
           fileInput.value = "";
           artistInput.value = "";
           titleInput.value = "";
+          messageInput.value = "";
           document.getElementById("preview-img").style.display = "none";
           document.getElementById("preview-placeholder").style.display = "flex";
           closeUploadPanel();
@@ -121,10 +178,16 @@
     }
 
     // ── lightbox ─────────────────────────────────
-    function openLightbox(url, title, artist) {
+    function openLightbox(url, title, artist, message) {
       document.getElementById("lb-img").src = url;
       document.getElementById("lb-title").textContent = title;
-      document.getElementById("lb-artist").textContent = "por " + artist;
+      const p = profiles[artist] || {};
+      const lbArtist = document.getElementById("lb-artist");
+      lbArtist.textContent = `${p.emoji || "🎨"} por ${artist}`;
+      lbArtist.style.color = p.color || "#aaa";
+      const msgEl = document.getElementById("lb-message");
+      if (message) { msgEl.textContent = `"${message}"`; msgEl.style.display = "block"; }
+      else { msgEl.style.display = "none"; }
       document.getElementById("lightbox").classList.add("active");
     }
 
@@ -132,15 +195,9 @@
       document.getElementById("lightbox").classList.remove("active");
     }
 
-    // ── painel de upload ─────────────────────────
-    function openUploadPanel() {
-      document.getElementById("upload-panel").classList.add("active");
-    }
-    function closeUploadPanel() {
-      document.getElementById("upload-panel").classList.remove("active");
-    }
+    function openUploadPanel() { document.getElementById("upload-panel").classList.add("active"); }
+    function closeUploadPanel() { document.getElementById("upload-panel").classList.remove("active"); }
 
-    // ── preview ──────────────────────────────────
     function handlePreview(e) {
       const file = e.target.files[0];
       if (!file) return;
@@ -154,7 +211,6 @@
       reader.readAsDataURL(file);
     }
 
-    // ── drag & drop ──────────────────────────────
     function setupDrop() {
       const zone = document.getElementById("drop-zone");
       zone.addEventListener("dragover", (e) => { e.preventDefault(); zone.classList.add("drag-over"); });
@@ -170,7 +226,6 @@
       });
     }
 
-    // ── init ─────────────────────────────────────
     window.addEventListener("DOMContentLoaded", () => {
       loadGallery();
       setupDrop();
@@ -180,6 +235,9 @@
       document.getElementById("close-panel").addEventListener("click", closeUploadPanel);
       document.getElementById("panel-backdrop").addEventListener("click", closeUploadPanel);
       document.getElementById("lightbox").addEventListener("click", closeLightbox);
+      document.querySelectorAll(".filter-btn").forEach(btn => {
+        btn.addEventListener("click", () => setFilter(btn.dataset.filter));
+      });
     });
   </script>
 
@@ -188,7 +246,6 @@
   <link href="https://fonts.googleapis.com/css2?family=Pacifico&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet" />
 
   <style>
-    /* ── reset & tokens ── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
@@ -199,9 +256,7 @@
       --coral: #ff7043;
       --teal: #26a69a;
       --teal2: #00897b;
-      --pink: #f06292;
       --lilac: #ba68c8;
-      --sky: #4fc3f7;
       --ink: #2d2d2d;
       --ink2: #5a5a5a;
       --shadow: rgba(0,0,0,0.10);
@@ -211,7 +266,6 @@
     }
 
     html { scroll-behavior: smooth; }
-
     body {
       font-family: var(--font-body);
       background: var(--cream);
@@ -219,121 +273,114 @@
       min-height: 100vh;
       overflow-x: hidden;
     }
-
-    /* ── squiggly bg ── */
     body::before {
       content: "";
-      position: fixed;
-      inset: 0;
+      position: fixed; inset: 0;
       background:
         radial-gradient(ellipse at 10% 20%, #ffd54f33 0%, transparent 55%),
         radial-gradient(ellipse at 85% 10%, #f0629222 0%, transparent 50%),
         radial-gradient(ellipse at 70% 80%, #4fc3f722 0%, transparent 55%),
         radial-gradient(ellipse at 20% 85%, #ba68c822 0%, transparent 50%);
-      pointer-events: none;
-      z-index: 0;
+      pointer-events: none; z-index: 0;
     }
 
-    /* ── header ── */
+    /* header */
     header {
-      position: relative;
-      z-index: 1;
+      position: relative; z-index: 1;
       text-align: center;
       padding: 3.5rem 1rem 2rem;
     }
-
     .header-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      background: var(--yellow);
-      color: var(--ink);
-      font-size: .8rem;
-      font-weight: 800;
-      letter-spacing: .06em;
-      text-transform: uppercase;
-      padding: 6px 16px;
-      border-radius: 99px;
-      margin-bottom: 1.2rem;
+      display: inline-flex; align-items: center; gap: 8px;
+      background: var(--yellow); color: var(--ink);
+      font-size: .8rem; font-weight: 800; letter-spacing: .06em;
+      text-transform: uppercase; padding: 6px 16px;
+      border-radius: 99px; margin-bottom: 1.2rem;
       box-shadow: 0 2px 8px #ffb30040;
     }
-
     h1 {
       font-family: var(--font-display);
-      font-size: clamp(2.4rem, 6vw, 4rem);
-      line-height: 1.1;
-      color: var(--coral);
+      font-size: clamp(1.8rem, 5vw, 3.2rem);
+      line-height: 1.2; color: var(--coral);
       text-shadow: 3px 3px 0 #ffd54f88;
       margin-bottom: .6rem;
     }
-
     .tagline {
-      font-size: 1.05rem;
-      color: var(--ink2);
-      font-weight: 600;
-      max-width: 420px;
-      margin: 0 auto;
+      font-size: 1rem; color: var(--ink2);
+      font-weight: 600; max-width: 480px;
+      margin: 0 auto; line-height: 1.55;
     }
-
-    /* ── deco pencils ── */
     .deco {
-      font-size: 2rem;
-      position: absolute;
+      font-size: 2rem; position: absolute;
       animation: float 4s ease-in-out infinite;
-      user-select: none;
-      pointer-events: none;
+      user-select: none; pointer-events: none;
     }
     .deco:nth-child(1) { top: 1.5rem; left: 5%; animation-delay: 0s; }
     .deco:nth-child(2) { top: 3rem; right: 7%; animation-delay: .8s; }
     .deco:nth-child(3) { top: 5rem; left: 14%; animation-delay: 1.5s; }
     .deco:nth-child(4) { top: 1rem; right: 18%; animation-delay: 2s; }
-
     @keyframes float {
-      0%, 100% { transform: translateY(0) rotate(-5deg); }
+      0%,100% { transform: translateY(0) rotate(-5deg); }
       50% { transform: translateY(-10px) rotate(5deg); }
     }
 
-    /* ── wavy divider ── */
-    .wave {
-      width: 100%;
-      line-height: 0;
-      position: relative;
-      z-index: 1;
-    }
+    .wave { width: 100%; line-height: 0; position: relative; z-index: 1; }
     .wave svg { display: block; }
 
-    /* ── gallery section ── */
+    /* filtro / menu */
+    .filter-nav {
+      position: relative; z-index: 1;
+      display: flex; justify-content: center;
+      gap: .8rem; padding: 0 1rem 2rem; flex-wrap: wrap;
+    }
+    .filter-btn {
+      font-family: var(--font-body); font-size: .95rem;
+      font-weight: 800; border: 3px solid transparent;
+      border-radius: 99px; padding: .55rem 1.4rem;
+      cursor: pointer; background: #fff; color: var(--ink2);
+      box-shadow: 0 3px 12px var(--shadow); transition: all .2s;
+    }
+    .filter-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 18px var(--shadow); }
+    .filter-btn[data-filter="all"].active    { background: var(--yellow); border-color: var(--yellow2); color: var(--ink); }
+    .filter-btn[data-filter="Elisa"].active  { background: #fff3f0; border-color: var(--coral); color: var(--coral); }
+    .filter-btn[data-filter="Cecília"].active{ background: #f9f0ff; border-color: var(--lilac); color: var(--lilac); }
+
+    /* perfil */
+    #profile-box {
+      display: none; align-items: center; gap: 1.2rem;
+      max-width: 580px; margin: 0 auto 2rem;
+      padding: 1.2rem 1.5rem; border-radius: var(--radius);
+      border: 3px solid; position: relative; z-index: 1;
+      animation: popIn .35s cubic-bezier(.34,1.56,.64,1);
+    }
+    #profile-emoji { font-size: 3.2rem; flex-shrink: 0; }
+    #profile-name {
+      font-family: var(--font-display); font-size: 1.5rem;
+      display: block; margin-bottom: .3rem;
+    }
+    #profile-desc { font-size: .9rem; color: var(--ink2); font-weight: 600; line-height: 1.5; }
+
+    /* gallery */
     .gallery-section {
-      position: relative;
-      z-index: 1;
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 2.5rem 1.5rem 8rem;
+      position: relative; z-index: 1;
+      max-width: 1200px; margin: 0 auto;
+      padding: 0 1.5rem 8rem;
     }
-
     .section-label {
-      font-family: var(--font-display);
-      font-size: 1.5rem;
-      color: var(--teal2);
-      margin-bottom: 1.8rem;
-      display: flex;
-      align-items: center;
-      gap: 10px;
+      font-family: var(--font-display); font-size: 1.4rem;
+      color: var(--teal2); margin-bottom: 1.8rem;
+      display: flex; align-items: center; gap: 10px;
     }
-
-    /* ── grid ── */
     #gallery-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
       gap: 1.5rem;
     }
 
-    /* ── card ── */
+    /* card */
     .card {
-      background: #fff;
-      border-radius: var(--radius);
-      overflow: hidden;
-      box-shadow: 0 4px 20px var(--shadow);
+      background: #fff; border-radius: var(--radius);
+      overflow: hidden; box-shadow: 0 4px 20px var(--shadow);
       transition: transform .25s, box-shadow .25s;
       animation: popIn .45s cubic-bezier(.34,1.56,.64,1) both;
     }
@@ -341,339 +388,223 @@
       from { opacity: 0; transform: scale(.85) translateY(20px); }
       to   { opacity: 1; transform: none; }
     }
-    .card:hover {
-      transform: translateY(-6px) rotate(-1deg);
-      box-shadow: 0 12px 30px rgba(0,0,0,.14);
-    }
-
+    .card:hover { transform: translateY(-6px) rotate(-1deg); box-shadow: 0 12px 30px rgba(0,0,0,.14); }
     .card-img-wrap {
-      aspect-ratio: 1;
-      overflow: hidden;
-      background: var(--warm);
-      cursor: zoom-in;
+      aspect-ratio: 1; overflow: hidden;
+      background: var(--warm); cursor: zoom-in; position: relative;
     }
-    .card-img-wrap img {
-      width: 100%; height: 100%;
-      object-fit: cover;
-      transition: transform .35s;
-    }
+    .card-img-wrap img { width:100%; height:100%; object-fit:cover; transition: transform .35s; }
     .card:hover .card-img-wrap img { transform: scale(1.05); }
+    .card-artist-tag {
+      position: absolute; top: .6rem; left: .6rem;
+      color: #fff; font-size: .75rem; font-weight: 800;
+      padding: 3px 10px; border-radius: 99px;
+    }
+    .card-info { padding: .8rem 1rem 1rem; display: flex; flex-direction: column; gap: 4px; }
+    .card-title { font-size: .95rem; color: var(--ink); font-weight: 700; }
+    .card-message {
+      font-size: .82rem; color: var(--ink2); font-style: italic;
+      font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .card-date { font-size: .75rem; color: #bbb; font-weight: 600; }
 
-    .card-info {
-      padding: .8rem 1rem 1rem;
-      display: grid;
-      grid-template-columns: 1fr auto;
-      grid-template-rows: auto auto;
-      gap: 2px 8px;
-    }
-    .card-artist {
-      font-weight: 800;
-      font-size: .95rem;
-      color: var(--coral);
-      grid-column: 1;
-    }
-    .card-title {
-      font-size: .9rem;
-      color: var(--ink);
-      font-weight: 600;
-      grid-column: 1;
-    }
-    .card-date {
-      font-size: .75rem;
-      color: #aaa;
-      grid-column: 2;
-      grid-row: 1 / 3;
-      align-self: center;
-      writing-mode: vertical-rl;
-      text-orientation: mixed;
-      transform: rotate(180deg);
-    }
-
-    /* ── empty state ── */
+    /* empty */
     #empty-state {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 1rem;
-      padding: 4rem 1rem;
-      color: var(--ink2);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 1rem; padding: 4rem 1rem; color: var(--ink2);
     }
     #empty-state .big-emoji { font-size: 4.5rem; }
     #empty-state p { font-size: 1.1rem; font-weight: 700; text-align: center; }
     #empty-state small { font-size: .9rem; color: #aaa; }
 
-    /* ── FAB ── */
+    /* FAB */
     #fab-upload {
-      position: fixed;
-      bottom: 2rem;
-      right: 2rem;
-      z-index: 200;
-      background: var(--coral);
-      color: #fff;
-      border: none;
-      border-radius: 99px;
-      padding: .85rem 1.6rem;
-      font-family: var(--font-body);
-      font-size: 1rem;
-      font-weight: 800;
-      cursor: pointer;
-      box-shadow: 0 6px 20px #ff704360;
+      position: fixed; bottom: 2rem; right: 2rem; z-index: 200;
+      background: var(--coral); color: #fff; border: none;
+      border-radius: 99px; padding: .85rem 1.6rem;
+      font-family: var(--font-body); font-size: 1rem; font-weight: 800;
+      cursor: pointer; box-shadow: 0 6px 20px #ff704360;
       transition: transform .2s, box-shadow .2s;
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      display: flex; align-items: center; gap: 8px;
     }
-    #fab-upload:hover {
-      transform: translateY(-3px) scale(1.04);
-      box-shadow: 0 10px 28px #ff704360;
-    }
+    #fab-upload:hover { transform: translateY(-3px) scale(1.04); box-shadow: 0 10px 28px #ff704360; }
 
-    /* ── upload panel ── */
+    /* upload panel */
     #panel-backdrop {
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,.45);
-      backdrop-filter: blur(4px);
-      z-index: 299;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity .3s;
+      position: fixed; inset: 0; background: rgba(0,0,0,.45);
+      backdrop-filter: blur(4px); z-index: 299;
+      opacity: 0; pointer-events: none; transition: opacity .3s;
     }
     #upload-panel {
-      position: fixed;
-      bottom: 0; left: 0; right: 0;
-      z-index: 300;
-      background: var(--cream);
-      border-radius: 28px 28px 0 0;
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 300;
+      background: var(--cream); border-radius: 28px 28px 0 0;
       padding: 2rem 1.5rem 3rem;
       transform: translateY(110%);
       transition: transform .4s cubic-bezier(.34,1.2,.64,1);
-      max-width: 560px;
-      margin: 0 auto;
+      max-width: 560px; margin: 0 auto;
       box-shadow: 0 -8px 40px rgba(0,0,0,.18);
+      max-height: 92vh; overflow-y: auto;
     }
-    #upload-panel.active {
-      transform: translateY(0);
-    }
-    #upload-panel.active ~ #panel-backdrop,
-    #panel-backdrop:has(+ #upload-panel.active) { opacity: 1; pointer-events: auto; }
-    /* Simpler: toggle backdrop with JS */
-
-    .panel-handle {
-      width: 44px; height: 5px;
-      background: #ddd;
-      border-radius: 99px;
-      margin: 0 auto 1.5rem;
-    }
-
-    .panel-title {
-      font-family: var(--font-display);
-      font-size: 1.6rem;
-      color: var(--teal2);
-      margin-bottom: 1.5rem;
-      text-align: center;
-    }
+    #upload-panel.active { transform: translateY(0); }
+    .panel-handle { width:44px; height:5px; background:#ddd; border-radius:99px; margin: 0 auto 1.5rem; }
+    .panel-title { font-family: var(--font-display); font-size: 1.6rem; color: var(--teal2); margin-bottom: 1.5rem; text-align: center; }
 
     /* drop zone */
     #drop-zone {
-      border: 3px dashed var(--yellow2);
-      border-radius: var(--radius);
-      background: var(--warm);
-      cursor: pointer;
-      position: relative;
-      overflow: hidden;
-      aspect-ratio: 4/3;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 1rem;
-      transition: border-color .2s, background .2s;
+      border: 3px dashed var(--yellow2); border-radius: var(--radius);
+      background: var(--warm); cursor: pointer; position: relative;
+      overflow: hidden; aspect-ratio: 4/3;
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 1rem; transition: border-color .2s, background .2s;
     }
     #drop-zone.drag-over { border-color: var(--coral); background: #fff0e8; }
-    #drop-zone input[type="file"] {
-      position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
-    }
-    #preview-placeholder {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: .5rem;
-      pointer-events: none;
-    }
+    #drop-zone input[type="file"] { position: absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%; }
+    #preview-placeholder { display:flex; flex-direction:column; align-items:center; gap:.5rem; pointer-events:none; }
     #preview-placeholder .icon { font-size: 3rem; }
     #preview-placeholder p { font-size: .9rem; font-weight: 700; color: var(--ink2); }
     #preview-placeholder small { font-size: .78rem; color: #aaa; }
-    #preview-img {
-      position: absolute; inset: 0;
-      width: 100%; height: 100%;
-      object-fit: contain;
-      display: none;
-    }
+    #preview-img { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; display:none; }
 
-    /* form fields */
-    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; margin-bottom: .8rem; }
-    .field-row input, .upload-form input:not([type=file]) {
-      width: 100%;
-      padding: .7rem 1rem;
-      border: 2px solid #e8e8e8;
-      border-radius: 12px;
-      font-family: var(--font-body);
-      font-size: .95rem;
-      font-weight: 600;
-      color: var(--ink);
-      background: #fff;
-      transition: border-color .2s;
+    /* form */
+    .field-wrap { margin-bottom: .9rem; }
+    .field-label {
+      display: block; font-size: .78rem; font-weight: 800;
+      color: var(--ink2); margin-bottom: 5px;
+      letter-spacing: .04em; text-transform: uppercase;
     }
-    .field-row input:focus, .upload-form input:focus { outline: none; border-color: var(--teal); }
+    .select-wrap { position: relative; }
+    .select-wrap::after {
+      content: "▾"; position: absolute; right: 1rem; top: 50%;
+      transform: translateY(-50%); pointer-events: none;
+      color: var(--ink2); font-size: 1rem;
+    }
+    select#artist-input,
+    input#title-input,
+    textarea#message-input {
+      width: 100%; padding: .7rem 1rem;
+      border: 2px solid #e8e8e8; border-radius: 12px;
+      font-family: var(--font-body); font-size: .95rem;
+      font-weight: 600; color: var(--ink); background: #fff;
+      transition: border-color .2s; appearance: none;
+    }
+    select#artist-input:focus,
+    input#title-input:focus,
+    textarea#message-input:focus { outline: none; border-color: var(--teal); }
+    textarea#message-input { resize: vertical; min-height: 80px; }
 
     #upload-btn {
-      width: 100%;
-      padding: .9rem;
-      background: var(--teal);
-      color: #fff;
-      border: none;
-      border-radius: 14px;
-      font-family: var(--font-body);
-      font-size: 1rem;
-      font-weight: 800;
-      cursor: pointer;
-      margin-top: .5rem;
+      width: 100%; padding: .9rem; background: var(--teal); color: #fff;
+      border: none; border-radius: 14px; font-family: var(--font-body);
+      font-size: 1rem; font-weight: 800; cursor: pointer; margin-top: .5rem;
       transition: background .2s, transform .15s;
     }
     #upload-btn:hover { background: var(--teal2); transform: scale(1.02); }
     #upload-btn:disabled { background: #ccc; cursor: not-allowed; transform: none; }
 
-    #progress-wrap {
-      display: none;
-      margin: .6rem 0;
-      background: #eee;
-      border-radius: 99px;
-      overflow: hidden;
-      height: 8px;
-    }
-    #progress-bar {
-      height: 100%;
-      background: linear-gradient(90deg, var(--teal), var(--yellow2));
-      border-radius: 99px;
-      width: 0;
-      transition: width .2s;
-    }
+    #progress-wrap { display:none; margin:.6rem 0; background:#eee; border-radius:99px; overflow:hidden; height:8px; }
+    #progress-bar { height:100%; background: linear-gradient(90deg, var(--teal), var(--yellow2)); border-radius:99px; width:0; transition:width .2s; }
 
-    .feedback { font-size: .9rem; font-weight: 700; text-align: center; margin-top: .5rem; padding: .4rem; border-radius: 8px; }
-    .feedback.success { color: var(--teal2); background: #e0f2f1; }
-    .feedback.error   { color: var(--coral); background: #fbe9e7; }
+    .feedback { font-size:.9rem; font-weight:700; text-align:center; margin-top:.5rem; padding:.4rem; border-radius:8px; }
+    .feedback.success { color:var(--teal2); background:#e0f2f1; }
+    .feedback.error   { color:var(--coral); background:#fbe9e7; }
 
     #close-panel {
-      position: absolute;
-      top: 1.2rem; right: 1.4rem;
-      background: #eee;
-      border: none;
-      border-radius: 99px;
-      width: 34px; height: 34px;
-      font-size: 1.1rem;
-      cursor: pointer;
-      display: flex; align-items: center; justify-content: center;
-      transition: background .2s;
+      position:absolute; top:1.2rem; right:1.4rem;
+      background:#eee; border:none; border-radius:99px;
+      width:34px; height:34px; font-size:1.1rem; cursor:pointer;
+      display:flex; align-items:center; justify-content:center; transition:background .2s;
     }
-    #close-panel:hover { background: #ddd; }
+    #close-panel:hover { background:#ddd; }
 
-    /* ── lightbox ── */
+    /* lightbox */
     #lightbox {
-      position: fixed;
-      inset: 0;
-      z-index: 500;
-      background: rgba(0,0,0,.88);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 1rem;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity .25s;
-      cursor: zoom-out;
-      padding: 1.5rem;
+      position:fixed; inset:0; z-index:500; background:rgba(0,0,0,.88);
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      gap:.8rem; opacity:0; pointer-events:none; transition:opacity .25s;
+      cursor:zoom-out; padding:1.5rem;
     }
-    #lightbox.active { opacity: 1; pointer-events: auto; }
+    #lightbox.active { opacity:1; pointer-events:auto; }
     #lb-img {
-      max-width: 90vw;
-      max-height: 78vh;
-      border-radius: 16px;
-      box-shadow: 0 20px 60px rgba(0,0,0,.5);
-      object-fit: contain;
+      max-width:90vw; max-height:70vh; border-radius:16px;
+      box-shadow:0 20px 60px rgba(0,0,0,.5); object-fit:contain;
       animation: zoomIn .3s cubic-bezier(.34,1.4,.64,1);
     }
-    @keyframes zoomIn {
-      from { transform: scale(.8); opacity: 0; }
-      to   { transform: none; opacity: 1; }
-    }
-    #lb-title { font-family: var(--font-display); font-size: 1.4rem; color: #fff; }
-    #lb-artist { font-size: .95rem; color: #ccc; font-weight: 600; }
+    @keyframes zoomIn { from{transform:scale(.8);opacity:0} to{transform:none;opacity:1} }
+    #lb-title { font-family:var(--font-display); font-size:1.4rem; color:#fff; }
+    #lb-artist { font-size:.95rem; font-weight:700; }
+    #lb-message { font-size:.9rem; color:#ddd; font-style:italic; font-weight:600; max-width:400px; text-align:center; }
 
-    /* ── footer ── */
-    footer {
-      text-align: center;
-      padding: 1.5rem;
-      font-size: .85rem;
-      color: #bbb;
-      position: relative;
-      z-index: 1;
-    }
-    footer span { color: var(--coral); }
+    /* footer */
+    footer { text-align:center; padding:1.5rem; font-size:.85rem; color:#bbb; position:relative; z-index:1; }
+    footer span { color:var(--coral); }
 
-    /* ── responsive ── */
+    /* responsive */
     @media (max-width: 480px) {
       #gallery-grid { grid-template-columns: repeat(2, 1fr); gap: 1rem; }
-      .field-row { grid-template-columns: 1fr; }
+      #profile-box { flex-direction: column; text-align: center; }
     }
   </style>
 </head>
 <body>
 
-  <!-- ── Header ── -->
+  <!-- header -->
   <header>
     <span class="deco">✏️</span>
     <span class="deco">🎨</span>
     <span class="deco">🖍️</span>
     <span class="deco">⭐</span>
 
-    <div class="header-badge">🌈 galeria de artes</div>
-    <h1>Desenhos da Elisa e da Gurico</h1>
-    <p class="tagline">Um cantinho cheio de amor para guardar cada traço, cada cor, cada criação especial.</p>
+    <div class="header-badge">🏛️ museu de arte</div>
+    <h1>Recordações de Elisa e Cecília</h1>
+    <p class="tagline">um cantinho cheio de amor para guardar cada cartinha e cada desenho feitos pelas maiores artistas do universo: minhas sobrinhas</p>
   </header>
 
-  <!-- ── Wave ── -->
+  <!-- wave -->
   <div class="wave">
     <svg viewBox="0 0 1440 60" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">
       <path d="M0,30 C240,60 480,0 720,30 C960,60 1200,0 1440,30 L1440,60 L0,60 Z" fill="#fff4e0" opacity=".6"/>
     </svg>
   </div>
 
-  <!-- ── Gallery ── -->
+  <!-- filtro -->
+  <nav class="filter-nav">
+    <button class="filter-btn active" data-filter="all">🌈 Todas as artistas</button>
+    <button class="filter-btn" data-filter="Elisa">🌸 Elisa</button>
+    <button class="filter-btn" data-filter="Cecília">🦋 Cecília</button>
+  </nav>
+
+  <!-- perfil -->
+  <div id="profile-box" style="margin: 0 1.5rem 2rem;">
+    <div id="profile-emoji"></div>
+    <div>
+      <span id="profile-name"></span>
+      <span id="profile-desc"></span>
+    </div>
+  </div>
+
+  <!-- gallery -->
   <section class="gallery-section">
-    <p class="section-label">✨ Todas as criações</p>
-
+    <p class="section-label">✨ Criações</p>
     <div id="gallery-grid"></div>
-
     <div id="empty-state" style="display:none">
       <div class="big-emoji">🎨</div>
-      <p>A galeria está esperando os primeiros desenhos!</p>
+      <p>Nenhum desenho aqui ainda!</p>
       <small>Clique no botão abaixo para adicionar o primeiro.</small>
     </div>
   </section>
 
-  <!-- ── FAB ── -->
+  <!-- FAB -->
   <button id="fab-upload">✏️ Adicionar desenho</button>
 
-  <!-- ── Upload Panel ── -->
+  <!-- upload panel -->
   <div id="panel-backdrop"></div>
   <div id="upload-panel">
     <button id="close-panel">✕</button>
     <div class="panel-handle"></div>
     <p class="panel-title">Novo Desenho 🖌️</p>
 
-    <form id="upload-form" class="upload-form">
+    <form id="upload-form">
       <div id="drop-zone">
         <input type="file" id="file-input" accept="image/*" />
         <div id="preview-placeholder">
@@ -684,37 +615,55 @@
         <img id="preview-img" alt="preview" />
       </div>
 
-      <div class="field-row">
-        <input type="text" id="artist-input" placeholder="Quem desenhou? 🌟" maxlength="40" required />
-        <input type="text" id="title-input" placeholder="Nome do desenho 🎨" maxlength="60" required />
+      <div class="field-wrap">
+        <label class="field-label" for="artist-input">Nome da artista ⭐</label>
+        <div class="select-wrap">
+          <select id="artist-input" required>
+            <option value="" disabled selected>Escolha a artista…</option>
+            <option value="Elisa">🌸 Elisa</option>
+            <option value="Cecília">🦋 Cecília</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field-wrap">
+        <label class="field-label" for="title-input">Nome do desenho 🎨</label>
+        <input type="text" id="title-input" placeholder="Como esse desenho se chama?" maxlength="60" required />
+      </div>
+
+      <div class="field-wrap">
+        <label class="field-label" for="message-input">
+          Mensagem para Tia Naninha 💌
+          <span style="font-weight:400;text-transform:none;font-size:.85em;letter-spacing:0"> (opcional)</span>
+        </label>
+        <textarea id="message-input" placeholder="Escreva uma mensagem carinhosa…" maxlength="280"></textarea>
       </div>
 
       <div id="progress-wrap"><div id="progress-bar"></div></div>
       <div id="upload-feedback" class="feedback"></div>
-
       <button type="submit" id="upload-btn">Enviar desenho ✨</button>
     </form>
   </div>
 
-  <!-- ── Lightbox ── -->
+  <!-- lightbox -->
   <div id="lightbox">
     <img id="lb-img" alt="" />
     <p id="lb-title"></p>
     <p id="lb-artist"></p>
+    <p id="lb-message"></p>
   </div>
 
-  <!-- ── Footer ── -->
+  <!-- footer -->
   <footer>Feito com <span>♥</span> para guardar cada rabisco especial</footer>
 
-  <!-- backdrop toggle helper -->
   <script>
     const panel = document.getElementById("upload-panel");
     const backdrop = document.getElementById("panel-backdrop");
-    const obs = new MutationObserver(() => {
-      backdrop.style.opacity = panel.classList.contains("active") ? "1" : "0";
-      backdrop.style.pointerEvents = panel.classList.contains("active") ? "auto" : "none";
-    });
-    obs.observe(panel, { attributes: true });
+    new MutationObserver(() => {
+      const on = panel.classList.contains("active");
+      backdrop.style.opacity = on ? "1" : "0";
+      backdrop.style.pointerEvents = on ? "auto" : "none";
+    }).observe(panel, { attributes: true });
   </script>
 
 </body>
