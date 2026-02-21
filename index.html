@@ -5,11 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Recordações de Elisa e Cecília ✏️</title>
 
-  <!-- Firebase SDK -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-app.js";
-    import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-storage.js";
-    import { getFirestore, collection, addDoc, getDocs, orderBy, query } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
+    import { getStorage, ref as sRef, uploadBytesResumable, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-storage.js";
+    import { getFirestore, collection, addDoc, getDocs, getDoc, doc, updateDoc, deleteDoc, orderBy, query, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyBGpAUvb0voIDWhS7TctqHhrl17EHUBs18",
@@ -24,31 +23,50 @@
     const storage = getStorage(app);
     const db = getFirestore(app);
 
-    // perfis das artistas
-    const profiles = {
-      Elisa: {
-        color: "#ff7043",
-        bg: "#fff3f0",
-        emoji: "🌸",
-        desc: "Artista cheia de imaginação e alegria, a Elisa transforma cada folha em branco numa aventura colorida. Seus desenhos são cheios de vida, personagens inventados e muita, muita cor!"
-      },
-      Cecília: {
-        color: "#ba68c8",
-        bg: "#f9f0ff",
-        emoji: "🦋",
-        desc: "A Cecília tem um traço delicado e cheio de detalhes que encantam quem olha. Cada desenho dela é uma história silenciosa esperando ser descoberta — cheia de amor e de beleza."
+    // ── senha ──────────────────────────────────────
+    const SENHA = "2sobrinhas";
+    let isAdmin = sessionStorage.getItem("galeria_admin") === "1";
+
+    function checkAdmin() { return isAdmin; }
+
+    function tryLogin(senha) {
+      if (senha === SENHA) {
+        isAdmin = true;
+        sessionStorage.setItem("galeria_admin", "1");
+        return true;
       }
+      return false;
+    }
+
+    function logout() {
+      isAdmin = false;
+      sessionStorage.removeItem("galeria_admin");
+      updateAdminUI();
+      renderGallery();
+    }
+
+    function updateAdminUI() {
+      document.getElementById("fab-upload").style.display = isAdmin ? "flex" : "none";
+      document.getElementById("btn-logout").style.display = isAdmin ? "inline-flex" : "none";
+      document.getElementById("btn-login").style.display = isAdmin ? "none" : "inline-flex";
+      renderGallery();
+    }
+
+    // ── perfis ──────────────────────────────────────
+    const profiles = {
+      Elisa:   { color: "#ff7043", bg: "#fff3f0", emoji: "🌸", desc: "Artista cheia de imaginação e alegria, a Elisa transforma cada folha em branco numa aventura colorida. Seus desenhos são cheios de vida, personagens inventados e muita, muita cor!" },
+      Cecília: { color: "#ba68c8", bg: "#f9f0ff", emoji: "🦋", desc: "A Cecília tem um traço delicado e cheio de detalhes que encantam quem olha. Cada desenho dela é uma história silenciosa esperando ser descoberta — cheia de amor e de beleza." }
     };
 
     let allDrawings = [];
     let activeFilter = "all";
 
-    // ── carrega galeria ──────────────────────────
+    // ── galeria ──────────────────────────────────────
     async function loadGallery() {
       const q = query(collection(db, "drawings"), orderBy("createdAt", "desc"));
       const snap = await getDocs(q);
       allDrawings = [];
-      snap.forEach(doc => allDrawings.push(doc.data()));
+      snap.forEach(d => allDrawings.push({ id: d.id, ...d.data() }));
       renderGallery();
     }
 
@@ -57,187 +75,319 @@
       const empty = document.getElementById("empty-state");
       grid.innerHTML = "";
 
-      const filtered = activeFilter === "all"
-        ? allDrawings
-        : allDrawings.filter(d => d.artist === activeFilter);
+      const filtered = activeFilter === "all" ? allDrawings : allDrawings.filter(d => d.artist === activeFilter);
 
-      if (filtered.length === 0) {
-        empty.style.display = "flex";
-        return;
-      }
+      if (filtered.length === 0) { empty.style.display = "flex"; return; }
       empty.style.display = "none";
 
       filtered.forEach((data, i) => {
-        const profile = profiles[data.artist] || {};
+        const p = profiles[data.artist] || {};
         const card = document.createElement("div");
         card.className = "card";
         card.style.animationDelay = `${i * 0.06}s`;
         card.innerHTML = `
           <div class="card-img-wrap">
             <img src="${data.url}" alt="${data.title}" loading="lazy" />
-            <div class="card-artist-tag" style="background:${profile.color || '#aaa'}">${profile.emoji || '🎨'} ${data.artist}</div>
+            <div class="card-artist-tag" style="background:${p.color||'#aaa'}">${p.emoji||'🎨'} ${data.artist}</div>
+            ${isAdmin ? `
+            <div class="card-admin-btns">
+              <button class="card-btn edit-btn" title="Editar">✏️</button>
+              <button class="card-btn del-btn" title="Excluir">🗑️</button>
+            </div>` : ""}
           </div>
           <div class="card-info">
             <span class="card-title">${data.title}</span>
             ${data.message ? `<span class="card-message">"${data.message}"</span>` : ""}
-            <span class="card-date">${new Date(data.createdAt?.toDate?.() ?? data.createdAt).toLocaleDateString("pt-BR", { day:"2-digit", month:"short", year:"numeric" })}</span>
-          </div>`;
-        card.querySelector("img").addEventListener("click", () => openLightbox(data.url, data.title, data.artist, data.message));
+            <span class="card-date">${new Date(data.createdAt?.toDate?.() ?? data.createdAt).toLocaleDateString("pt-BR",{day:"2-digit",month:"short",year:"numeric"})}</span>
+          </div>
+          <button class="comment-toggle-btn">💬 Ver comentários</button>
+        `;
+
+        card.querySelector("img").addEventListener("click", () => openLightbox(data));
+        if (isAdmin) {
+          card.querySelector(".edit-btn").addEventListener("click", (e) => { e.stopPropagation(); openEditPanel(data); });
+          card.querySelector(".del-btn").addEventListener("click", (e) => { e.stopPropagation(); confirmDelete(data); });
+        }
+        card.querySelector(".comment-toggle-btn").addEventListener("click", () => toggleComments(card, data.id));
+
         grid.appendChild(card);
       });
     }
 
-    // ── filtro ───────────────────────────────────
+    // ── filtro ──────────────────────────────────────
     function setFilter(filter) {
       activeFilter = filter;
-
-      document.querySelectorAll(".filter-btn").forEach(btn => {
-        btn.classList.toggle("active", btn.dataset.filter === filter);
-      });
-
-      const profileBox = document.getElementById("profile-box");
-      if (filter === "all") {
-        profileBox.style.display = "none";
-      } else {
+      document.querySelectorAll(".filter-btn").forEach(b => b.classList.toggle("active", b.dataset.filter === filter));
+      const pb = document.getElementById("profile-box");
+      if (filter === "all") { pb.style.display = "none"; }
+      else {
         const p = profiles[filter];
-        profileBox.style.display = "flex";
-        profileBox.style.background = p.bg;
-        profileBox.style.borderColor = p.color;
+        pb.style.display = "flex";
+        pb.style.background = p.bg;
+        pb.style.borderColor = p.color;
         document.getElementById("profile-emoji").textContent = p.emoji;
         document.getElementById("profile-name").textContent = filter;
         document.getElementById("profile-name").style.color = p.color;
         document.getElementById("profile-desc").textContent = p.desc;
       }
-
       renderGallery();
     }
 
-    // ── upload ───────────────────────────────────
+    // ── upload ──────────────────────────────────────
     async function handleUpload(e) {
       e.preventDefault();
-      const fileInput = document.getElementById("file-input");
+      const fileInput   = document.getElementById("file-input");
       const artistInput = document.getElementById("artist-input");
-      const titleInput = document.getElementById("title-input");
-      const messageInput = document.getElementById("message-input");
-      const btn = document.getElementById("upload-btn");
-      const progressWrap = document.getElementById("progress-wrap");
-      const progressBar = document.getElementById("progress-bar");
-      const feedback = document.getElementById("upload-feedback");
+      const titleInput  = document.getElementById("title-input");
+      const msgInput    = document.getElementById("message-input");
+      const btn         = document.getElementById("upload-btn");
+      const progWrap    = document.getElementById("progress-wrap");
+      const progBar     = document.getElementById("progress-bar");
+      const feedback    = document.getElementById("upload-feedback");
 
-      const file = fileInput.files[0];
+      const file   = fileInput.files[0];
       const artist = artistInput.value;
-      const title = titleInput.value.trim();
-      const message = messageInput.value.trim();
+      const title  = titleInput.value.trim();
+      const message= msgInput.value.trim();
 
       if (!file || !artist || !title) {
         feedback.textContent = "Preencha todos os campos obrigatórios!";
-        feedback.className = "feedback error";
-        return;
+        feedback.className = "feedback error"; return;
       }
+      btn.disabled = true; btn.textContent = "Enviando…";
+      progWrap.style.display = "block"; feedback.textContent = "";
 
-      btn.disabled = true;
-      btn.textContent = "Enviando…";
-      progressWrap.style.display = "block";
-      feedback.textContent = "";
-
-      const storageRef = ref(storage, `drawings/${Date.now()}_${file.name}`);
-      const task = uploadBytesResumable(storageRef, file);
+      const stRef = sRef(storage, `drawings/${Date.now()}_${file.name}`);
+      const task  = uploadBytesResumable(stRef, file);
 
       task.on("state_changed",
-        (snap) => {
-          const pct = Math.round((snap.bytesTransferred / snap.totalBytes) * 100);
-          progressBar.style.width = pct + "%";
-        },
-        (err) => {
-          feedback.textContent = "Erro ao enviar: " + err.message;
-          feedback.className = "feedback error";
-          btn.disabled = false;
-          btn.textContent = "Enviar desenho ✨";
-          progressWrap.style.display = "none";
+        snap => { progBar.style.width = Math.round(snap.bytesTransferred / snap.totalBytes * 100) + "%"; },
+        err  => {
+          feedback.textContent = "Erro: " + err.message; feedback.className = "feedback error";
+          btn.disabled = false; btn.textContent = "Enviar desenho ✨"; progWrap.style.display = "none";
         },
         async () => {
           const url = await getDownloadURL(task.snapshot.ref);
-          await addDoc(collection(db, "drawings"), { url, artist, title, message, createdAt: new Date() });
-
-          feedback.textContent = "Desenho adicionado com amor! 💛";
-          feedback.className = "feedback success";
-          btn.disabled = false;
-          btn.textContent = "Enviar desenho ✨";
-          progressWrap.style.display = "none";
-          progressBar.style.width = "0";
-          fileInput.value = "";
-          artistInput.value = "";
-          titleInput.value = "";
-          messageInput.value = "";
+          await addDoc(collection(db, "drawings"), { url, artist, title, message, storageRef: stRef.fullPath, createdAt: serverTimestamp() });
+          feedback.textContent = "Desenho adicionado com amor! 💛"; feedback.className = "feedback success";
+          btn.disabled = false; btn.textContent = "Enviar desenho ✨";
+          progWrap.style.display = "none"; progBar.style.width = "0";
+          fileInput.value = ""; artistInput.value = ""; titleInput.value = ""; msgInput.value = "";
           document.getElementById("preview-img").style.display = "none";
           document.getElementById("preview-placeholder").style.display = "flex";
-          closeUploadPanel();
-          loadGallery();
+          closeUploadPanel(); loadGallery();
         }
       );
     }
 
-    // ── lightbox ─────────────────────────────────
-    function openLightbox(url, title, artist, message) {
-      document.getElementById("lb-img").src = url;
-      document.getElementById("lb-title").textContent = title;
-      const p = profiles[artist] || {};
-      const lbArtist = document.getElementById("lb-artist");
-      lbArtist.textContent = `${p.emoji || "🎨"} por ${artist}`;
-      lbArtist.style.color = p.color || "#aaa";
-      const msgEl = document.getElementById("lb-message");
-      if (message) { msgEl.textContent = `"${message}"`; msgEl.style.display = "block"; }
-      else { msgEl.style.display = "none"; }
+    // ── editar ──────────────────────────────────────
+    function openEditPanel(data) {
+      document.getElementById("edit-id").value        = data.id;
+      document.getElementById("edit-artist").value    = data.artist;
+      document.getElementById("edit-title").value     = data.title;
+      document.getElementById("edit-message").value   = data.message || "";
+      document.getElementById("edit-feedback").textContent = "";
+      document.getElementById("edit-panel").classList.add("active");
+      document.getElementById("panel-backdrop").style.opacity = "1";
+      document.getElementById("panel-backdrop").style.pointerEvents = "auto";
+    }
+
+    function closeEditPanel() {
+      document.getElementById("edit-panel").classList.remove("active");
+      document.getElementById("panel-backdrop").style.opacity = "0";
+      document.getElementById("panel-backdrop").style.pointerEvents = "none";
+    }
+
+    async function handleEdit(e) {
+      e.preventDefault();
+      const id      = document.getElementById("edit-id").value;
+      const artist  = document.getElementById("edit-artist").value;
+      const title   = document.getElementById("edit-title").value.trim();
+      const message = document.getElementById("edit-message").value.trim();
+      const fb      = document.getElementById("edit-feedback");
+      const btn     = document.getElementById("edit-btn");
+      if (!artist || !title) { fb.textContent = "Preencha os campos!"; fb.className = "feedback error"; return; }
+      btn.disabled = true; btn.textContent = "Salvando…";
+      await updateDoc(doc(db, "drawings", id), { artist, title, message });
+      fb.textContent = "Salvo! ✅"; fb.className = "feedback success";
+      btn.disabled = false; btn.textContent = "Salvar alterações";
+      setTimeout(() => { closeEditPanel(); loadGallery(); }, 800);
+    }
+
+    // ── deletar ──────────────────────────────────────
+    function confirmDelete(data) {
+      document.getElementById("confirm-box").style.display = "flex";
+      document.getElementById("confirm-yes").onclick = async () => {
+        document.getElementById("confirm-box").style.display = "none";
+        // deleta imagem do storage
+        if (data.storageRef) { try { await deleteObject(sRef(storage, data.storageRef)); } catch(_) {} }
+        // deleta comentários
+        const commSnap = await getDocs(collection(db, "drawings", data.id, "comments"));
+        await Promise.all(commSnap.docs.map(d => deleteDoc(d.ref)));
+        // deleta doc
+        await deleteDoc(doc(db, "drawings", data.id));
+        loadGallery();
+      };
+      document.getElementById("confirm-no").onclick = () => {
+        document.getElementById("confirm-box").style.display = "none";
+      };
+    }
+
+    // ── comentários ──────────────────────────────────
+    async function toggleComments(card, drawingId) {
+      let section = card.querySelector(".comments-section");
+      if (section) { section.remove(); return; }
+
+      section = document.createElement("div");
+      section.className = "comments-section";
+      section.innerHTML = `<div class="comments-loading">Carregando… 💬</div>`;
+      card.appendChild(section);
+
+      await loadComments(section, drawingId);
+    }
+
+    async function loadComments(section, drawingId) {
+      const q = query(collection(db, "drawings", drawingId, "comments"), orderBy("createdAt", "asc"));
+      const snap = await getDocs(q);
+
+      let html = `<div class="comments-list">`;
+      if (snap.empty) {
+        html += `<p class="no-comments">Nenhum comentário ainda. Seja o primeiro! 🌟</p>`;
+      } else {
+        snap.forEach(d => {
+          const c = d.data();
+          const date = c.createdAt ? new Date(c.createdAt.toDate()).toLocaleDateString("pt-BR",{day:"2-digit",month:"short"}) : "";
+          html += `<div class="comment-item">
+            <span class="comment-author">${c.author}</span>
+            <span class="comment-date">${date}</span>
+            <p class="comment-text">${c.text}</p>
+            ${isAdmin ? `<button class="del-comment-btn" data-id="${d.id}" data-drawing="${drawingId}">✕</button>` : ""}
+          </div>`;
+        });
+      }
+      html += `</div>
+        <form class="comment-form" data-drawing="${drawingId}">
+          <input type="text" class="comment-author-input" placeholder="Seu nome 🌟" maxlength="40" required />
+          <textarea class="comment-text-input" placeholder="Deixe um elogio para a artista! 💛" maxlength="300" required></textarea>
+          <button type="submit" class="comment-submit-btn">Enviar comentário</button>
+        </form>`;
+
+      section.innerHTML = html;
+
+      section.querySelectorAll(".del-comment-btn").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          await deleteDoc(doc(db, "drawings", btn.dataset.drawing, "comments", btn.dataset.id));
+          await loadComments(section, drawingId);
+        });
+      });
+
+      section.querySelector(".comment-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const author = section.querySelector(".comment-author-input").value.trim();
+        const text   = section.querySelector(".comment-text-input").value.trim();
+        const btn    = section.querySelector(".comment-submit-btn");
+        if (!author || !text) return;
+        btn.disabled = true; btn.textContent = "Enviando…";
+        await addDoc(collection(db, "drawings", drawingId, "comments"), { author, text, createdAt: serverTimestamp() });
+        await loadComments(section, drawingId);
+      });
+    }
+
+    // ── lightbox ──────────────────────────────────────
+    function openLightbox(data) {
+      const p = profiles[data.artist] || {};
+      document.getElementById("lb-img").src = data.url;
+      document.getElementById("lb-title").textContent = data.title;
+      const la = document.getElementById("lb-artist");
+      la.textContent = `${p.emoji||"🎨"} por ${data.artist}`;
+      la.style.color = p.color || "#aaa";
+      const lm = document.getElementById("lb-message");
+      lm.textContent = data.message ? `"${data.message}"` : "";
+      lm.style.display = data.message ? "block" : "none";
       document.getElementById("lightbox").classList.add("active");
     }
+    function closeLightbox() { document.getElementById("lightbox").classList.remove("active"); }
 
-    function closeLightbox() {
-      document.getElementById("lightbox").classList.remove("active");
+    // ── painel upload ─────────────────────────────────
+    function openUploadPanel() {
+      document.getElementById("upload-panel").classList.add("active");
+      document.getElementById("panel-backdrop").style.opacity = "1";
+      document.getElementById("panel-backdrop").style.pointerEvents = "auto";
+    }
+    function closeUploadPanel() {
+      document.getElementById("upload-panel").classList.remove("active");
+      document.getElementById("panel-backdrop").style.opacity = "0";
+      document.getElementById("panel-backdrop").style.pointerEvents = "none";
     }
 
-    function openUploadPanel() { document.getElementById("upload-panel").classList.add("active"); }
-    function closeUploadPanel() { document.getElementById("upload-panel").classList.remove("active"); }
+    // ── login modal ───────────────────────────────────
+    function openLoginModal() {
+      document.getElementById("login-modal").classList.add("active");
+    }
+    function closeLoginModal() {
+      document.getElementById("login-modal").classList.remove("active");
+      document.getElementById("login-error").textContent = "";
+      document.getElementById("login-senha").value = "";
+    }
 
+    // ── preview ───────────────────────────────────────
     function handlePreview(e) {
-      const file = e.target.files[0];
-      if (!file) return;
+      const file = e.target.files[0]; if (!file) return;
       const reader = new FileReader();
-      reader.onload = (ev) => {
+      reader.onload = ev => {
         const img = document.getElementById("preview-img");
-        img.src = ev.target.result;
-        img.style.display = "block";
+        img.src = ev.target.result; img.style.display = "block";
         document.getElementById("preview-placeholder").style.display = "none";
       };
       reader.readAsDataURL(file);
     }
 
+    // ── drop zone ──────────────────────────────────────
     function setupDrop() {
       const zone = document.getElementById("drop-zone");
-      zone.addEventListener("dragover", (e) => { e.preventDefault(); zone.classList.add("drag-over"); });
+      zone.addEventListener("dragover", e => { e.preventDefault(); zone.classList.add("drag-over"); });
       zone.addEventListener("dragleave", () => zone.classList.remove("drag-over"));
-      zone.addEventListener("drop", (e) => {
-        e.preventDefault();
-        zone.classList.remove("drag-over");
+      zone.addEventListener("drop", e => {
+        e.preventDefault(); zone.classList.remove("drag-over");
         const file = e.dataTransfer.files[0];
-        if (file) {
-          document.getElementById("file-input").files = e.dataTransfer.files;
-          handlePreview({ target: { files: [file] } });
-        }
+        if (file) { document.getElementById("file-input").files = e.dataTransfer.files; handlePreview({target:{files:[file]}}); }
       });
     }
 
+    // ── init ───────────────────────────────────────────
     window.addEventListener("DOMContentLoaded", () => {
       loadGallery();
       setupDrop();
+      updateAdminUI();
+
       document.getElementById("upload-form").addEventListener("submit", handleUpload);
+      document.getElementById("edit-form").addEventListener("submit", handleEdit);
       document.getElementById("file-input").addEventListener("change", handlePreview);
+
       document.getElementById("fab-upload").addEventListener("click", openUploadPanel);
-      document.getElementById("close-panel").addEventListener("click", closeUploadPanel);
-      document.getElementById("panel-backdrop").addEventListener("click", closeUploadPanel);
+      document.getElementById("btn-login").addEventListener("click", openLoginModal);
+      document.getElementById("btn-logout").addEventListener("click", logout);
+
+      document.getElementById("close-upload-panel").addEventListener("click", closeUploadPanel);
+      document.getElementById("close-edit-panel").addEventListener("click", closeEditPanel);
+      document.getElementById("panel-backdrop").addEventListener("click", () => { closeUploadPanel(); closeEditPanel(); });
+
       document.getElementById("lightbox").addEventListener("click", closeLightbox);
-      document.querySelectorAll(".filter-btn").forEach(btn => {
-        btn.addEventListener("click", () => setFilter(btn.dataset.filter));
+
+      document.querySelectorAll(".filter-btn").forEach(b => b.addEventListener("click", () => setFilter(b.dataset.filter)));
+
+      // login form
+      document.getElementById("login-form").addEventListener("submit", e => {
+        e.preventDefault();
+        const senha = document.getElementById("login-senha").value;
+        if (tryLogin(senha)) {
+          closeLoginModal();
+          updateAdminUI();
+        } else {
+          document.getElementById("login-error").textContent = "Senha incorreta. Tente novamente!";
+        }
       });
+      document.getElementById("close-login").addEventListener("click", closeLoginModal);
     });
   </script>
 
@@ -247,35 +397,19 @@
 
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     :root {
-      --cream: #fffdf6;
-      --warm: #fff4e0;
-      --yellow: #ffd54f;
-      --yellow2: #ffb300;
-      --coral: #ff7043;
-      --teal: #26a69a;
-      --teal2: #00897b;
-      --lilac: #ba68c8;
-      --ink: #2d2d2d;
-      --ink2: #5a5a5a;
-      --shadow: rgba(0,0,0,0.10);
-      --radius: 20px;
+      --cream: #fffdf6; --warm: #fff4e0;
+      --yellow: #ffd54f; --yellow2: #ffb300;
+      --coral: #ff7043; --teal: #26a69a; --teal2: #00897b;
+      --lilac: #ba68c8; --ink: #2d2d2d; --ink2: #5a5a5a;
+      --shadow: rgba(0,0,0,0.10); --radius: 20px;
       --font-display: "Pacifico", cursive;
       --font-body: "Nunito", sans-serif;
     }
-
     html { scroll-behavior: smooth; }
-    body {
-      font-family: var(--font-body);
-      background: var(--cream);
-      color: var(--ink);
-      min-height: 100vh;
-      overflow-x: hidden;
-    }
+    body { font-family: var(--font-body); background: var(--cream); color: var(--ink); min-height: 100vh; overflow-x: hidden; }
     body::before {
-      content: "";
-      position: fixed; inset: 0;
+      content: ""; position: fixed; inset: 0;
       background:
         radial-gradient(ellipse at 10% 20%, #ffd54f33 0%, transparent 55%),
         radial-gradient(ellipse at 85% 10%, #f0629222 0%, transparent 50%),
@@ -285,158 +419,113 @@
     }
 
     /* header */
-    header {
-      position: relative; z-index: 1;
-      text-align: center;
-      padding: 3.5rem 1rem 2rem;
+    header { position: relative; z-index: 1; text-align: center; padding: 3.5rem 1rem 1.5rem; }
+    .header-top { display: flex; justify-content: flex-end; padding: .5rem 1.5rem 0; position: relative; z-index: 2; gap: .5rem; }
+    .header-badge { display: inline-flex; align-items: center; gap: 8px; background: var(--yellow); color: var(--ink); font-size: .8rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; padding: 6px 16px; border-radius: 99px; margin-bottom: 1.2rem; box-shadow: 0 2px 8px #ffb30040; }
+    h1 { font-family: var(--font-display); font-size: clamp(1.8rem, 5vw, 3.2rem); line-height: 1.2; color: var(--coral); text-shadow: 3px 3px 0 #ffd54f88; margin-bottom: .6rem; }
+    .tagline { font-size: 1rem; color: var(--ink2); font-weight: 600; max-width: 480px; margin: 0 auto; line-height: 1.55; }
+    .deco { font-size: 2rem; position: absolute; animation: float 4s ease-in-out infinite; user-select: none; pointer-events: none; }
+    .deco:nth-child(1){top:1.5rem;left:5%;animation-delay:0s}
+    .deco:nth-child(2){top:3rem;right:7%;animation-delay:.8s}
+    .deco:nth-child(3){top:5rem;left:14%;animation-delay:1.5s}
+    .deco:nth-child(4){top:1rem;right:18%;animation-delay:2s}
+    @keyframes float { 0%,100%{transform:translateY(0) rotate(-5deg)} 50%{transform:translateY(-10px) rotate(5deg)} }
+
+    /* botões de autenticação */
+    .auth-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: .45rem 1rem; border-radius: 99px; border: 2px solid;
+      font-family: var(--font-body); font-size: .82rem; font-weight: 800;
+      cursor: pointer; transition: all .2s;
     }
-    .header-badge {
-      display: inline-flex; align-items: center; gap: 8px;
-      background: var(--yellow); color: var(--ink);
-      font-size: .8rem; font-weight: 800; letter-spacing: .06em;
-      text-transform: uppercase; padding: 6px 16px;
-      border-radius: 99px; margin-bottom: 1.2rem;
-      box-shadow: 0 2px 8px #ffb30040;
-    }
-    h1 {
-      font-family: var(--font-display);
-      font-size: clamp(1.8rem, 5vw, 3.2rem);
-      line-height: 1.2; color: var(--coral);
-      text-shadow: 3px 3px 0 #ffd54f88;
-      margin-bottom: .6rem;
-    }
-    .tagline {
-      font-size: 1rem; color: var(--ink2);
-      font-weight: 600; max-width: 480px;
-      margin: 0 auto; line-height: 1.55;
-    }
-    .deco {
-      font-size: 2rem; position: absolute;
-      animation: float 4s ease-in-out infinite;
-      user-select: none; pointer-events: none;
-    }
-    .deco:nth-child(1) { top: 1.5rem; left: 5%; animation-delay: 0s; }
-    .deco:nth-child(2) { top: 3rem; right: 7%; animation-delay: .8s; }
-    .deco:nth-child(3) { top: 5rem; left: 14%; animation-delay: 1.5s; }
-    .deco:nth-child(4) { top: 1rem; right: 18%; animation-delay: 2s; }
-    @keyframes float {
-      0%,100% { transform: translateY(0) rotate(-5deg); }
-      50% { transform: translateY(-10px) rotate(5deg); }
-    }
+    #btn-login  { background: #fff; border-color: var(--teal); color: var(--teal2); }
+    #btn-login:hover { background: var(--teal); color: #fff; }
+    #btn-logout { background: #fff; border-color: #ddd; color: var(--ink2); display: none; }
+    #btn-logout:hover { background: #f5f5f5; }
 
     .wave { width: 100%; line-height: 0; position: relative; z-index: 1; }
     .wave svg { display: block; }
 
-    /* filtro / menu */
-    .filter-nav {
-      position: relative; z-index: 1;
-      display: flex; justify-content: center;
-      gap: .8rem; padding: 0 1rem 2rem; flex-wrap: wrap;
-    }
-    .filter-btn {
-      font-family: var(--font-body); font-size: .95rem;
-      font-weight: 800; border: 3px solid transparent;
-      border-radius: 99px; padding: .55rem 1.4rem;
-      cursor: pointer; background: #fff; color: var(--ink2);
-      box-shadow: 0 3px 12px var(--shadow); transition: all .2s;
-    }
-    .filter-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 18px var(--shadow); }
+    /* filtro */
+    .filter-nav { position: relative; z-index: 1; display: flex; justify-content: center; gap: .8rem; padding: 0 1rem 2rem; flex-wrap: wrap; }
+    .filter-btn { font-family: var(--font-body); font-size: .95rem; font-weight: 800; border: 3px solid transparent; border-radius: 99px; padding: .55rem 1.4rem; cursor: pointer; background: #fff; color: var(--ink2); box-shadow: 0 3px 12px var(--shadow); transition: all .2s; }
+    .filter-btn:hover { transform: translateY(-2px); }
     .filter-btn[data-filter="all"].active    { background: var(--yellow); border-color: var(--yellow2); color: var(--ink); }
     .filter-btn[data-filter="Elisa"].active  { background: #fff3f0; border-color: var(--coral); color: var(--coral); }
     .filter-btn[data-filter="Cecília"].active{ background: #f9f0ff; border-color: var(--lilac); color: var(--lilac); }
 
     /* perfil */
-    #profile-box {
-      display: none; align-items: center; gap: 1.2rem;
-      max-width: 580px; margin: 0 auto 2rem;
-      padding: 1.2rem 1.5rem; border-radius: var(--radius);
-      border: 3px solid; position: relative; z-index: 1;
-      animation: popIn .35s cubic-bezier(.34,1.56,.64,1);
-    }
+    #profile-box { display: none; align-items: center; gap: 1.2rem; max-width: 580px; margin: 0 auto 2rem; padding: 1.2rem 1.5rem; border-radius: var(--radius); border: 3px solid; position: relative; z-index: 1; animation: popIn .35s cubic-bezier(.34,1.56,.64,1); }
     #profile-emoji { font-size: 3.2rem; flex-shrink: 0; }
-    #profile-name {
-      font-family: var(--font-display); font-size: 1.5rem;
-      display: block; margin-bottom: .3rem;
-    }
-    #profile-desc { font-size: .9rem; color: var(--ink2); font-weight: 600; line-height: 1.5; }
+    #profile-name  { font-family: var(--font-display); font-size: 1.5rem; display: block; margin-bottom: .3rem; }
+    #profile-desc  { font-size: .9rem; color: var(--ink2); font-weight: 600; line-height: 1.5; }
 
     /* gallery */
-    .gallery-section {
-      position: relative; z-index: 1;
-      max-width: 1200px; margin: 0 auto;
-      padding: 0 1.5rem 8rem;
-    }
-    .section-label {
-      font-family: var(--font-display); font-size: 1.4rem;
-      color: var(--teal2); margin-bottom: 1.8rem;
-      display: flex; align-items: center; gap: 10px;
-    }
-    #gallery-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-      gap: 1.5rem;
-    }
+    .gallery-section { position: relative; z-index: 1; max-width: 1200px; margin: 0 auto; padding: 0 1.5rem 8rem; }
+    .section-label { font-family: var(--font-display); font-size: 1.4rem; color: var(--teal2); margin-bottom: 1.8rem; display: flex; align-items: center; gap: 10px; }
+    #gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px,1fr)); gap: 1.5rem; }
 
     /* card */
-    .card {
-      background: #fff; border-radius: var(--radius);
-      overflow: hidden; box-shadow: 0 4px 20px var(--shadow);
-      transition: transform .25s, box-shadow .25s;
-      animation: popIn .45s cubic-bezier(.34,1.56,.64,1) both;
-    }
-    @keyframes popIn {
-      from { opacity: 0; transform: scale(.85) translateY(20px); }
-      to   { opacity: 1; transform: none; }
-    }
-    .card:hover { transform: translateY(-6px) rotate(-1deg); box-shadow: 0 12px 30px rgba(0,0,0,.14); }
-    .card-img-wrap {
-      aspect-ratio: 1; overflow: hidden;
-      background: var(--warm); cursor: zoom-in; position: relative;
-    }
-    .card-img-wrap img { width:100%; height:100%; object-fit:cover; transition: transform .35s; }
+    .card { background: #fff; border-radius: var(--radius); overflow: hidden; box-shadow: 0 4px 20px var(--shadow); transition: transform .25s, box-shadow .25s; animation: popIn .45s cubic-bezier(.34,1.56,.64,1) both; }
+    @keyframes popIn { from{opacity:0;transform:scale(.85) translateY(20px)} to{opacity:1;transform:none} }
+    .card:hover { transform: translateY(-4px); box-shadow: 0 12px 30px rgba(0,0,0,.13); }
+    .card-img-wrap { aspect-ratio: 1; overflow: hidden; background: var(--warm); cursor: zoom-in; position: relative; }
+    .card-img-wrap img { width:100%; height:100%; object-fit:cover; transition:transform .35s; }
     .card:hover .card-img-wrap img { transform: scale(1.05); }
-    .card-artist-tag {
-      position: absolute; top: .6rem; left: .6rem;
-      color: #fff; font-size: .75rem; font-weight: 800;
-      padding: 3px 10px; border-radius: 99px;
-    }
-    .card-info { padding: .8rem 1rem 1rem; display: flex; flex-direction: column; gap: 4px; }
-    .card-title { font-size: .95rem; color: var(--ink); font-weight: 700; }
-    .card-message {
-      font-size: .82rem; color: var(--ink2); font-style: italic;
-      font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    }
-    .card-date { font-size: .75rem; color: #bbb; font-weight: 600; }
+    .card-artist-tag { position:absolute; top:.6rem; left:.6rem; color:#fff; font-size:.75rem; font-weight:800; padding:3px 10px; border-radius:99px; }
+
+    /* botões admin no card */
+    .card-admin-btns { position: absolute; top: .6rem; right: .6rem; display: flex; gap: 6px; }
+    .card-btn { background: rgba(255,255,255,.9); border: none; border-radius: 99px; width: 32px; height: 32px; font-size: .9rem; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,.15); transition: transform .15s; }
+    .card-btn:hover { transform: scale(1.15); }
+
+    .card-info { padding: .8rem 1rem .5rem; display: flex; flex-direction: column; gap: 4px; }
+    .card-title   { font-size: .95rem; color: var(--ink); font-weight: 700; }
+    .card-message { font-size: .82rem; color: var(--ink2); font-style: italic; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .card-date    { font-size: .75rem; color: #bbb; font-weight: 600; }
+
+    /* botão comentários */
+    .comment-toggle-btn { width: 100%; background: none; border: none; border-top: 1px solid #f0f0f0; padding: .55rem; font-family: var(--font-body); font-size: .82rem; font-weight: 700; color: var(--teal2); cursor: pointer; transition: background .15s; }
+    .comment-toggle-btn:hover { background: #f0faf9; }
+
+    /* seção de comentários */
+    .comments-section { padding: .8rem 1rem 1rem; border-top: 1px solid #f0f0f0; background: #fafafa; }
+    .comments-loading { font-size: .85rem; color: #aaa; text-align: center; padding: .5rem; }
+    .no-comments { font-size: .85rem; color: #aaa; text-align: center; padding: .4rem 0 .8rem; }
+    .comments-list { display: flex; flex-direction: column; gap: .6rem; margin-bottom: .8rem; }
+    .comment-item { background: #fff; border-radius: 12px; padding: .6rem .8rem; position: relative; box-shadow: 0 1px 6px var(--shadow); }
+    .comment-author { font-size: .8rem; font-weight: 800; color: var(--coral); display: inline-block; margin-right: .4rem; }
+    .comment-date   { font-size: .72rem; color: #bbb; }
+    .comment-text   { font-size: .85rem; color: var(--ink); margin-top: 2px; line-height: 1.4; }
+    .del-comment-btn { position: absolute; top: .4rem; right: .5rem; background: none; border: none; cursor: pointer; font-size: .75rem; color: #ccc; transition: color .15s; }
+    .del-comment-btn:hover { color: var(--coral); }
+
+    /* form de comentário */
+    .comment-form { display: flex; flex-direction: column; gap: .5rem; }
+    .comment-author-input,
+    .comment-text-input  { width: 100%; padding: .5rem .8rem; border: 2px solid #e8e8e8; border-radius: 10px; font-family: var(--font-body); font-size: .85rem; font-weight: 600; color: var(--ink); background: #fff; transition: border-color .2s; resize: none; }
+    .comment-author-input:focus,
+    .comment-text-input:focus   { outline: none; border-color: var(--teal); }
+    .comment-text-input { min-height: 64px; }
+    .comment-submit-btn { background: var(--teal); color: #fff; border: none; border-radius: 10px; padding: .5rem; font-family: var(--font-body); font-size: .85rem; font-weight: 800; cursor: pointer; transition: background .2s; }
+    .comment-submit-btn:hover { background: var(--teal2); }
+    .comment-submit-btn:disabled { background: #ccc; cursor: not-allowed; }
 
     /* empty */
-    #empty-state {
-      display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
-      gap: 1rem; padding: 4rem 1rem; color: var(--ink2);
-    }
+    #empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; padding: 4rem 1rem; color: var(--ink2); }
     #empty-state .big-emoji { font-size: 4.5rem; }
     #empty-state p { font-size: 1.1rem; font-weight: 700; text-align: center; }
     #empty-state small { font-size: .9rem; color: #aaa; }
 
     /* FAB */
-    #fab-upload {
-      position: fixed; bottom: 2rem; right: 2rem; z-index: 200;
-      background: var(--coral); color: #fff; border: none;
-      border-radius: 99px; padding: .85rem 1.6rem;
-      font-family: var(--font-body); font-size: 1rem; font-weight: 800;
-      cursor: pointer; box-shadow: 0 6px 20px #ff704360;
-      transition: transform .2s, box-shadow .2s;
-      display: flex; align-items: center; gap: 8px;
-    }
+    #fab-upload { position: fixed; bottom: 2rem; right: 2rem; z-index: 200; background: var(--coral); color: #fff; border: none; border-radius: 99px; padding: .85rem 1.6rem; font-family: var(--font-body); font-size: .95rem; font-weight: 800; cursor: pointer; box-shadow: 0 6px 20px #ff704360; transition: transform .2s, box-shadow .2s; display: none; align-items: center; gap: 8px; }
     #fab-upload:hover { transform: translateY(-3px) scale(1.04); box-shadow: 0 10px 28px #ff704360; }
 
-    /* upload panel */
-    #panel-backdrop {
-      position: fixed; inset: 0; background: rgba(0,0,0,.45);
-      backdrop-filter: blur(4px); z-index: 299;
-      opacity: 0; pointer-events: none; transition: opacity .3s;
-    }
-    #upload-panel {
+    /* backdrop */
+    #panel-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.45); backdrop-filter: blur(4px); z-index: 299; opacity: 0; pointer-events: none; transition: opacity .3s; }
+
+    /* painéis (upload e edição) */
+    .slide-panel {
       position: fixed; bottom: 0; left: 0; right: 0; z-index: 300;
       background: var(--cream); border-radius: 28px 28px 0 0;
       padding: 2rem 1.5rem 3rem;
@@ -446,107 +535,114 @@
       box-shadow: 0 -8px 40px rgba(0,0,0,.18);
       max-height: 92vh; overflow-y: auto;
     }
-    #upload-panel.active { transform: translateY(0); }
-    .panel-handle { width:44px; height:5px; background:#ddd; border-radius:99px; margin: 0 auto 1.5rem; }
-    .panel-title { font-family: var(--font-display); font-size: 1.6rem; color: var(--teal2); margin-bottom: 1.5rem; text-align: center; }
+    .slide-panel.active { transform: translateY(0); }
+    .panel-handle { width: 44px; height: 5px; background: #ddd; border-radius: 99px; margin: 0 auto 1.5rem; }
+    .panel-title  { font-family: var(--font-display); font-size: 1.6rem; color: var(--teal2); margin-bottom: 1.5rem; text-align: center; }
+    .close-panel-btn { position: absolute; top: 1.2rem; right: 1.4rem; background: #eee; border: none; border-radius: 99px; width: 34px; height: 34px; font-size: 1.1rem; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background .2s; }
+    .close-panel-btn:hover { background: #ddd; }
 
     /* drop zone */
-    #drop-zone {
-      border: 3px dashed var(--yellow2); border-radius: var(--radius);
-      background: var(--warm); cursor: pointer; position: relative;
-      overflow: hidden; aspect-ratio: 4/3;
-      display: flex; align-items: center; justify-content: center;
-      margin-bottom: 1rem; transition: border-color .2s, background .2s;
-    }
+    #drop-zone { border: 3px dashed var(--yellow2); border-radius: var(--radius); background: var(--warm); cursor: pointer; position: relative; overflow: hidden; aspect-ratio: 4/3; display: flex; align-items: center; justify-content: center; margin-bottom: 1rem; transition: border-color .2s, background .2s; }
     #drop-zone.drag-over { border-color: var(--coral); background: #fff0e8; }
-    #drop-zone input[type="file"] { position: absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%; }
+    #drop-zone input[type="file"] { position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%; }
     #preview-placeholder { display:flex; flex-direction:column; align-items:center; gap:.5rem; pointer-events:none; }
     #preview-placeholder .icon { font-size: 3rem; }
     #preview-placeholder p { font-size: .9rem; font-weight: 700; color: var(--ink2); }
     #preview-placeholder small { font-size: .78rem; color: #aaa; }
     #preview-img { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; display:none; }
 
-    /* form */
+    /* campos */
     .field-wrap { margin-bottom: .9rem; }
-    .field-label {
-      display: block; font-size: .78rem; font-weight: 800;
-      color: var(--ink2); margin-bottom: 5px;
-      letter-spacing: .04em; text-transform: uppercase;
-    }
+    .field-label { display: block; font-size: .78rem; font-weight: 800; color: var(--ink2); margin-bottom: 5px; letter-spacing: .04em; text-transform: uppercase; }
     .select-wrap { position: relative; }
-    .select-wrap::after {
-      content: "▾"; position: absolute; right: 1rem; top: 50%;
-      transform: translateY(-50%); pointer-events: none;
-      color: var(--ink2); font-size: 1rem;
+    .select-wrap::after { content: "▾"; position: absolute; right: 1rem; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--ink2); }
+    select, input[type="text"], textarea.panel-textarea {
+      width: 100%; padding: .7rem 1rem; border: 2px solid #e8e8e8; border-radius: 12px;
+      font-family: var(--font-body); font-size: .95rem; font-weight: 600;
+      color: var(--ink); background: #fff; transition: border-color .2s; appearance: none;
     }
-    select#artist-input,
-    input#title-input,
-    textarea#message-input {
-      width: 100%; padding: .7rem 1rem;
-      border: 2px solid #e8e8e8; border-radius: 12px;
-      font-family: var(--font-body); font-size: .95rem;
-      font-weight: 600; color: var(--ink); background: #fff;
-      transition: border-color .2s; appearance: none;
-    }
-    select#artist-input:focus,
-    input#title-input:focus,
-    textarea#message-input:focus { outline: none; border-color: var(--teal); }
-    textarea#message-input { resize: vertical; min-height: 80px; }
+    select:focus, input[type="text"]:focus, textarea.panel-textarea:focus { outline: none; border-color: var(--teal); }
+    textarea.panel-textarea { resize: vertical; min-height: 80px; }
 
-    #upload-btn {
-      width: 100%; padding: .9rem; background: var(--teal); color: #fff;
-      border: none; border-radius: 14px; font-family: var(--font-body);
-      font-size: 1rem; font-weight: 800; cursor: pointer; margin-top: .5rem;
-      transition: background .2s, transform .15s;
-    }
-    #upload-btn:hover { background: var(--teal2); transform: scale(1.02); }
-    #upload-btn:disabled { background: #ccc; cursor: not-allowed; transform: none; }
+    .submit-btn { width: 100%; padding: .9rem; background: var(--teal); color: #fff; border: none; border-radius: 14px; font-family: var(--font-body); font-size: 1rem; font-weight: 800; cursor: pointer; margin-top: .5rem; transition: background .2s, transform .15s; }
+    .submit-btn:hover { background: var(--teal2); transform: scale(1.02); }
+    .submit-btn:disabled { background: #ccc; cursor: not-allowed; transform: none; }
 
     #progress-wrap { display:none; margin:.6rem 0; background:#eee; border-radius:99px; overflow:hidden; height:8px; }
-    #progress-bar { height:100%; background: linear-gradient(90deg, var(--teal), var(--yellow2)); border-radius:99px; width:0; transition:width .2s; }
+    #progress-bar  { height:100%; background: linear-gradient(90deg, var(--teal), var(--yellow2)); border-radius:99px; width:0; transition:width .2s; }
 
     .feedback { font-size:.9rem; font-weight:700; text-align:center; margin-top:.5rem; padding:.4rem; border-radius:8px; }
     .feedback.success { color:var(--teal2); background:#e0f2f1; }
     .feedback.error   { color:var(--coral); background:#fbe9e7; }
 
-    #close-panel {
-      position:absolute; top:1.2rem; right:1.4rem;
-      background:#eee; border:none; border-radius:99px;
-      width:34px; height:34px; font-size:1.1rem; cursor:pointer;
-      display:flex; align-items:center; justify-content:center; transition:background .2s;
+    /* modal de login */
+    #login-modal {
+      position: fixed; inset: 0; z-index: 400;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,.55); backdrop-filter: blur(6px);
+      opacity: 0; pointer-events: none; transition: opacity .25s;
     }
-    #close-panel:hover { background:#ddd; }
+    #login-modal.active { opacity: 1; pointer-events: auto; }
+    .login-box {
+      background: var(--cream); border-radius: 24px; padding: 2.2rem 2rem;
+      max-width: 360px; width: 90%; text-align: center;
+      box-shadow: 0 20px 60px rgba(0,0,0,.25);
+      animation: popIn .35s cubic-bezier(.34,1.56,.64,1);
+    }
+    .login-box h2 { font-family: var(--font-display); color: var(--coral); font-size: 1.6rem; margin-bottom: .4rem; }
+    .login-box p  { font-size: .9rem; color: var(--ink2); font-weight: 600; margin-bottom: 1.5rem; }
+    .login-senha-wrap { position: relative; margin-bottom: .8rem; }
+    #login-senha {
+      width: 100%; padding: .75rem 1rem; border: 2px solid #e8e8e8; border-radius: 14px;
+      font-family: var(--font-body); font-size: 1rem; font-weight: 600;
+      color: var(--ink); text-align: center; letter-spacing: .15em; transition: border-color .2s;
+    }
+    #login-senha:focus { outline: none; border-color: var(--teal); }
+    #login-error { font-size: .85rem; color: var(--coral); font-weight: 700; min-height: 1.2rem; margin-bottom: .4rem; }
+    .login-submit-btn { width: 100%; padding: .85rem; background: var(--coral); color: #fff; border: none; border-radius: 14px; font-family: var(--font-body); font-size: 1rem; font-weight: 800; cursor: pointer; transition: background .2s; }
+    .login-submit-btn:hover { background: #e64a19; }
+    #close-login { background: none; border: none; color: #bbb; font-size: .85rem; font-family: var(--font-body); font-weight: 700; cursor: pointer; margin-top: .8rem; display: block; width: 100%; }
+
+    /* confirmação de exclusão */
+    #confirm-box {
+      position: fixed; inset: 0; z-index: 600;
+      display: none; align-items: center; justify-content: center;
+      background: rgba(0,0,0,.6); backdrop-filter: blur(6px);
+    }
+    .confirm-inner { background: var(--cream); border-radius: 20px; padding: 2rem; max-width: 320px; width: 90%; text-align: center; box-shadow: 0 16px 50px rgba(0,0,0,.25); }
+    .confirm-inner h3 { font-family: var(--font-display); color: var(--coral); margin-bottom: .5rem; }
+    .confirm-inner p  { font-size: .9rem; color: var(--ink2); font-weight: 600; margin-bottom: 1.5rem; }
+    .confirm-btns { display: flex; gap: .8rem; justify-content: center; }
+    .confirm-btns button { padding: .65rem 1.4rem; border-radius: 99px; border: none; font-family: var(--font-body); font-size: .9rem; font-weight: 800; cursor: pointer; }
+    #confirm-yes { background: var(--coral); color: #fff; }
+    #confirm-no  { background: #eee; color: var(--ink2); }
 
     /* lightbox */
-    #lightbox {
-      position:fixed; inset:0; z-index:500; background:rgba(0,0,0,.88);
-      display:flex; flex-direction:column; align-items:center; justify-content:center;
-      gap:.8rem; opacity:0; pointer-events:none; transition:opacity .25s;
-      cursor:zoom-out; padding:1.5rem;
-    }
+    #lightbox { position:fixed; inset:0; z-index:500; background:rgba(0,0,0,.88); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.8rem; opacity:0; pointer-events:none; transition:opacity .25s; cursor:zoom-out; padding:1.5rem; }
     #lightbox.active { opacity:1; pointer-events:auto; }
-    #lb-img {
-      max-width:90vw; max-height:70vh; border-radius:16px;
-      box-shadow:0 20px 60px rgba(0,0,0,.5); object-fit:contain;
-      animation: zoomIn .3s cubic-bezier(.34,1.4,.64,1);
-    }
+    #lb-img { max-width:90vw; max-height:70vh; border-radius:16px; box-shadow:0 20px 60px rgba(0,0,0,.5); object-fit:contain; animation: zoomIn .3s cubic-bezier(.34,1.4,.64,1); }
     @keyframes zoomIn { from{transform:scale(.8);opacity:0} to{transform:none;opacity:1} }
-    #lb-title { font-family:var(--font-display); font-size:1.4rem; color:#fff; }
-    #lb-artist { font-size:.95rem; font-weight:700; }
+    #lb-title   { font-family:var(--font-display); font-size:1.4rem; color:#fff; }
+    #lb-artist  { font-size:.95rem; font-weight:700; }
     #lb-message { font-size:.9rem; color:#ddd; font-style:italic; font-weight:600; max-width:400px; text-align:center; }
 
     /* footer */
     footer { text-align:center; padding:1.5rem; font-size:.85rem; color:#bbb; position:relative; z-index:1; }
     footer span { color:var(--coral); }
 
-    /* responsive */
-    @media (max-width: 480px) {
-      #gallery-grid { grid-template-columns: repeat(2, 1fr); gap: 1rem; }
-      #profile-box { flex-direction: column; text-align: center; }
+    @media (max-width:480px) {
+      #gallery-grid { grid-template-columns: repeat(2,1fr); gap:1rem; }
+      #profile-box  { flex-direction:column; text-align:center; }
     }
   </style>
 </head>
 <body>
+
+  <!-- topo com botão de login -->
+  <div class="header-top">
+    <button class="auth-btn" id="btn-login">🔒 Área restrita aos familiares</button>
+    <button class="auth-btn" id="btn-logout">🔓 Sair da área restrita</button>
+  </div>
 
   <!-- header -->
   <header>
@@ -554,7 +650,6 @@
     <span class="deco">🎨</span>
     <span class="deco">🖍️</span>
     <span class="deco">⭐</span>
-
     <div class="header-badge">🏛️ museu de arte</div>
     <h1>Recordações de Elisa e Cecília</h1>
     <p class="tagline">um cantinho cheio de amor para guardar cada cartinha e cada desenho feitos pelas maiores artistas do universo: minhas sobrinhas</p>
@@ -575,7 +670,7 @@
   </nav>
 
   <!-- perfil -->
-  <div id="profile-box" style="margin: 0 1.5rem 2rem;">
+  <div id="profile-box" style="margin:0 1.5rem 2rem;">
     <div id="profile-emoji"></div>
     <div>
       <span id="profile-name"></span>
@@ -583,27 +678,28 @@
     </div>
   </div>
 
-  <!-- gallery -->
+  <!-- galeria -->
   <section class="gallery-section">
     <p class="section-label">✨ Criações</p>
     <div id="gallery-grid"></div>
     <div id="empty-state" style="display:none">
       <div class="big-emoji">🎨</div>
       <p>Nenhum desenho aqui ainda!</p>
-      <small>Clique no botão abaixo para adicionar o primeiro.</small>
+      <small>Clique no botão acima para entrar na área restrita e adicionar o primeiro.</small>
     </div>
   </section>
 
   <!-- FAB -->
   <button id="fab-upload">✏️ Adicionar desenho</button>
 
-  <!-- upload panel -->
+  <!-- backdrop -->
   <div id="panel-backdrop"></div>
-  <div id="upload-panel">
-    <button id="close-panel">✕</button>
+
+  <!-- painel de upload -->
+  <div id="upload-panel" class="slide-panel">
+    <button class="close-panel-btn" id="close-upload-panel">✕</button>
     <div class="panel-handle"></div>
     <p class="panel-title">Novo Desenho 🖌️</p>
-
     <form id="upload-form">
       <div id="drop-zone">
         <input type="file" id="file-input" accept="image/*" />
@@ -614,7 +710,6 @@
         </div>
         <img id="preview-img" alt="preview" />
       </div>
-
       <div class="field-wrap">
         <label class="field-label" for="artist-input">Nome da artista ⭐</label>
         <div class="select-wrap">
@@ -625,24 +720,75 @@
           </select>
         </div>
       </div>
-
       <div class="field-wrap">
-        <label class="field-label" for="title-input">Nome do seu desenho 🎨</label>
+        <label class="field-label" for="title-input">Nome do desenho 🎨</label>
         <input type="text" id="title-input" placeholder="Como esse desenho se chama?" maxlength="60" required />
       </div>
-
       <div class="field-wrap">
-        <label class="field-label" for="message-input">
-          Quer escrever algumas palavras sobre seu desenho? 💌
-          <span style="font-weight:400;text-transform:none;font-size:.85em;letter-spacing:0"> (opcional)</span>
-        </label>
-        <textarea id="message-input" placeholder="Escreva uma mensagem carinhosa…" maxlength="280"></textarea>
+        <label class="field-label" for="message-input">Mensagem para Tia Naninha 💌 <span style="font-weight:400;text-transform:none;font-size:.85em;letter-spacing:0">(opcional)</span></label>
+        <textarea id="message-input" class="panel-textarea" placeholder="Escreva sobre seu desenho (opcional)" maxlength="280"></textarea>
       </div>
-
       <div id="progress-wrap"><div id="progress-bar"></div></div>
       <div id="upload-feedback" class="feedback"></div>
-      <button type="submit" id="upload-btn">Enviar desenho ✨</button>
+      <button type="submit" class="submit-btn" id="upload-btn">Enviar desenho ✨</button>
     </form>
+  </div>
+
+  <!-- painel de edição -->
+  <div id="edit-panel" class="slide-panel">
+    <button class="close-panel-btn" id="close-edit-panel">✕</button>
+    <div class="panel-handle"></div>
+    <p class="panel-title">Editar Desenho ✏️</p>
+    <form id="edit-form">
+      <input type="hidden" id="edit-id" />
+      <div class="field-wrap">
+        <label class="field-label" for="edit-artist">Nome da artista ⭐</label>
+        <div class="select-wrap">
+          <select id="edit-artist" required>
+            <option value="Elisa">🌸 Elisa</option>
+            <option value="Cecília">🦋 Cecília</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-wrap">
+        <label class="field-label" for="edit-title">Nome do desenho 🎨</label>
+        <input type="text" id="edit-title" maxlength="60" required />
+      </div>
+      <div class="field-wrap">
+        <label class="field-label" for="edit-message">Mensagem para Tia Naninha 💌 <span style="font-weight:400;text-transform:none;font-size:.85em;letter-spacing:0">(opcional)</span></label>
+        <textarea id="edit-message" class="panel-textarea" maxlength="280" placeholder="Escreva sobre seu desenho (opcional)"></textarea>
+      </div>
+      <div id="edit-feedback" class="feedback"></div>
+      <button type="submit" class="submit-btn" id="edit-btn">Salvar alterações</button>
+    </form>
+  </div>
+
+  <!-- modal de login -->
+  <div id="login-modal">
+    <div class="login-box">
+      <h2>🔒 Área Restrita</h2>
+      <p>Apenas familiares podem adicionar e editar desenhos. Digite a senha para entrar.</p>
+      <form id="login-form">
+        <div class="login-senha-wrap">
+          <input type="password" id="login-senha" placeholder="••••••••••" autocomplete="off" required />
+        </div>
+        <div id="login-error"></div>
+        <button type="submit" class="login-submit-btn">Entrar ✨</button>
+      </form>
+      <button id="close-login">Cancelar</button>
+    </div>
+  </div>
+
+  <!-- confirmação de exclusão -->
+  <div id="confirm-box">
+    <div class="confirm-inner">
+      <h3>Excluir desenho?</h3>
+      <p>Essa ação não pode ser desfeita. O desenho será removido para sempre.</p>
+      <div class="confirm-btns">
+        <button id="confirm-yes">Sim, excluir</button>
+        <button id="confirm-no">Cancelar</button>
+      </div>
+    </div>
   </div>
 
   <!-- lightbox -->
@@ -655,16 +801,6 @@
 
   <!-- footer -->
   <footer>Feito com <span>♥</span> para guardar cada rabisco especial</footer>
-
-  <script>
-    const panel = document.getElementById("upload-panel");
-    const backdrop = document.getElementById("panel-backdrop");
-    new MutationObserver(() => {
-      const on = panel.classList.contains("active");
-      backdrop.style.opacity = on ? "1" : "0";
-      backdrop.style.pointerEvents = on ? "auto" : "none";
-    }).observe(panel, { attributes: true });
-  </script>
 
 </body>
 </html>
