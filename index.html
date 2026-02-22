@@ -68,7 +68,17 @@
       const q = query(collection(db, "drawings"), orderBy("createdAt", "desc"));
       const snap = await getDocs(q);
       allDrawings = [];
-      snap.forEach(d => allDrawings.push({ id: d.id, ...d.data() }));
+      // busca contagem de comentários para cada desenho
+      await Promise.all(snap.docs.map(async d => {
+        const commSnap = await getDocs(collection(db, "drawings", d.id, "comments"));
+        allDrawings.push({ id: d.id, commentCount: commSnap.size, ...d.data() });
+      }));
+      // reordenar por data pois Promise.all não garante ordem
+      allDrawings.sort((a, b) => {
+        const ta = a.createdAt?.toDate?.() ?? new Date(a.createdAt ?? 0);
+        const tb = b.createdAt?.toDate?.() ?? new Date(b.createdAt ?? 0);
+        return tb - ta;
+      });
       renderGallery();
     }
 
@@ -102,7 +112,11 @@
             ${data.message ? `<span class="card-message">"${data.message}"</span>` : ""}
             <span class="card-date">${new Date(data.createdAt?.toDate?.() ?? data.createdAt).toLocaleDateString("pt-BR",{day:"2-digit",month:"short",year:"numeric"})}</span>
           </div>
-          <button class="comment-toggle-btn">💬 Ver comentários</button>
+          <button class="comment-toggle-btn">
+            ${data.commentCount > 0
+              ? `💬 <strong>${data.commentCount}</strong> comentário${data.commentCount > 1 ? 's' : ''}`
+              : `✍️ Deixe seu comentário`}
+          </button>
         `;
 
         card.querySelector("img").addEventListener("click", () => openLightbox(data));
@@ -252,10 +266,24 @@
       section.innerHTML = `<div class="comments-loading">Carregando… 💬</div>`;
       card.appendChild(section);
 
-      await loadComments(section, drawingId);
+      await loadComments(section, drawingId, card);
     }
 
-    async function loadComments(section, drawingId) {
+    async function updateCommentBtn(card, drawingId) {
+      const commSnap = await getDocs(collection(db, "drawings", drawingId, "comments"));
+      const count = commSnap.size;
+      const btn = card.querySelector(".comment-toggle-btn");
+      if (btn) {
+        btn.innerHTML = count > 0
+          ? `💬 <strong>${count}</strong> comentário${count > 1 ? 's' : ''}`
+          : `✍️ Deixe seu comentário`;
+      }
+      // atualiza também no array em memória
+      const drawing = allDrawings.find(d => d.id === drawingId);
+      if (drawing) drawing.commentCount = count;
+    }
+
+    async function loadComments(section, drawingId, card) {
       const q = query(collection(db, "drawings", drawingId, "comments"), orderBy("createdAt", "asc"));
       const snap = await getDocs(q);
 
@@ -286,7 +314,8 @@
       section.querySelectorAll(".del-comment-btn").forEach(btn => {
         btn.addEventListener("click", async () => {
           await deleteDoc(doc(db, "drawings", btn.dataset.drawing, "comments", btn.dataset.id));
-          await loadComments(section, drawingId);
+          await loadComments(section, drawingId, card);
+          if (card) updateCommentBtn(card, drawingId);
         });
       });
 
@@ -298,7 +327,9 @@
         if (!author || !text) return;
         btn.disabled = true; btn.textContent = "Enviando…";
         await addDoc(collection(db, "drawings", drawingId, "comments"), { author, text, createdAt: serverTimestamp() });
-        await loadComments(section, drawingId);
+        await loadComments(section, drawingId, card);
+        // atualiza o botão do card com nova contagem
+        if (card) updateCommentBtn(card, drawingId);
       });
     }
 
@@ -530,8 +561,9 @@
     .card-date    { font-size: .75rem; color: #bbb; font-weight: 600; }
 
     /* botão comentários */
-    .comment-toggle-btn { width: 100%; background: none; border: none; border-top: 1px solid #f0f0f0; padding: .55rem; font-family: var(--font-body); font-size: .82rem; font-weight: 700; color: var(--teal2); cursor: pointer; transition: background .15s; }
+    .comment-toggle-btn { width: 100%; background: none; border: none; border-top: 1px solid #f0f0f0; padding: .55rem; font-family: var(--font-body); font-size: .82rem; font-weight: 700; color: var(--teal2); cursor: pointer; transition: background .15s; display: flex; align-items: center; justify-content: center; gap: 5px; }
     .comment-toggle-btn:hover { background: #f0faf9; }
+    .comment-toggle-btn strong { font-size: .95rem; }
 
     /* seção de comentários */
     .comments-section { padding: .8rem 1rem 1rem; border-top: 1px solid #f0f0f0; background: #fafafa; }
