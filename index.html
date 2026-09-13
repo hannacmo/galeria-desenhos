@@ -90,6 +90,14 @@
       document.getElementById("close-login").addEventListener("click", closeLoginModal);
     });
 
+    // página restaurada da memória (voltar, reabrir aba, app no celular):
+    // volta para "Todas as artistas" e busca os desenhos de novo
+    window.addEventListener("pageshow", e => {
+      if (!e.persisted || !sb) return;
+      setFilter("all");
+      loadGallery();
+    });
+
     // ── admin ─────────────────────────────────────
     function updateAdminUI() {
       document.getElementById("fab-upload").style.display  = isAdmin ? "flex" : "none";
