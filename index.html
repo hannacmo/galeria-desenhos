@@ -56,6 +56,7 @@
       document.getElementById("edit-form").addEventListener("submit", handleEdit);
       document.getElementById("file-input").addEventListener("change", handlePreview);
       document.getElementById("fab-upload").addEventListener("click", openUploadPanel);
+      document.getElementById("btn-app").addEventListener("click", toggleAppHelp);
       document.getElementById("btn-login").addEventListener("click", openLoginModal);
       document.getElementById("btn-logout").addEventListener("click", logout);
       document.getElementById("close-upload-panel").addEventListener("click", closeUploadPanel);
@@ -374,6 +375,13 @@
       document.getElementById("panel-backdrop").style.pointerEvents = "none";
     }
 
+    // ── salvar como app ───────────────────────────
+    function toggleAppHelp() {
+      const help = document.getElementById("app-help");
+      help.hidden = !help.hidden;
+      document.getElementById("btn-app").setAttribute("aria-expanded", String(!help.hidden));
+    }
+
     // ── login ─────────────────────────────────────
     function openLoginModal()  { document.getElementById("login-modal").classList.add("active"); }
     function closeLoginModal() {
@@ -431,7 +439,14 @@
         radial-gradient(ellipse at 20% 85%, #ba68c822 0%, transparent 50%);
       pointer-events: none; z-index: 0;
     }
-    .header-top { display: flex; justify-content: flex-end; padding: .5rem 1.5rem 0; position: relative; z-index: 2; gap: .5rem; }
+    .header-top { display: flex; justify-content: flex-end; flex-wrap: wrap; padding: .5rem 1.5rem 0; position: relative; z-index: 2; gap: .5rem; }
+    #btn-app { background: var(--yellow); border-color: var(--yellow2); color: var(--ink); margin-right: auto; }
+    #btn-app:hover, #btn-app[aria-expanded="true"] { background: var(--yellow2); }
+    #app-help { position: relative; z-index: 2; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; max-width: 760px; margin: .8rem auto 0; padding: 1.2rem 1.4rem; background: #fff; border: 3px solid var(--yellow); border-radius: var(--radius); box-shadow: 0 6px 24px var(--shadow); animation: popIn .35s cubic-bezier(.34,1.56,.64,1); width: calc(100% - 3rem); }
+    #app-help[hidden] { display: none; }
+    #app-help h3 { font-size: 1rem; font-weight: 800; color: var(--teal2); margin-bottom: .5rem; }
+    #app-help ol { padding-left: 1.2rem; display: flex; flex-direction: column; gap: .4rem; }
+    #app-help li { font-size: .9rem; font-weight: 600; color: var(--ink2); line-height: 1.45; }
     header { position: relative; z-index: 1; text-align: center; padding: 3.5rem 1rem 1.5rem; }
     .header-badge { display: inline-flex; align-items: center; gap: 8px; background: var(--yellow); color: var(--ink); font-size: .8rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; padding: 6px 16px; border-radius: 99px; margin-bottom: 1.2rem; box-shadow: 0 2px 8px #ffb30040; }
     h1 { font-family: var(--font-display); font-size: clamp(1.8rem, 5vw, 3.2rem); line-height: 1.2; color: var(--coral); text-shadow: 3px 3px 0 #ffd54f88; margin-bottom: .6rem; }
@@ -582,8 +597,28 @@
 <body>
 
   <div class="header-top">
+    <button class="auth-btn" id="btn-app" aria-expanded="false" aria-controls="app-help">📱 + Salvar como app no celular</button>
     <button class="auth-btn" id="btn-login">🔒 Área restrita aos familiares</button>
     <button class="auth-btn" id="btn-logout">🔓 Sair da área restrita</button>
+  </div>
+
+  <div id="app-help" hidden>
+    <div class="app-help-col">
+      <h3>iPhone (Safari)</h3>
+      <ol>
+        <li>Toque no ícone de compartilhar (o quadrado com uma seta para cima), na barra inferior.</li>
+        <li>Escolha "Adicionar à Tela de Início".</li>
+        <li>Toque em "Adicionar" — o ícone da Galeria de desenhos aparece na tela como um app.</li>
+      </ol>
+    </div>
+    <div class="app-help-col">
+      <h3>Android (Chrome)</h3>
+      <ol>
+        <li>Toque nos três pontinhos no canto superior direito.</li>
+        <li>Escolha "Adicionar à tela inicial" (ou "Instalar app").</li>
+        <li>Confirme — o ícone da Galeria de desenhos aparece na tela como um app.</li>
+      </ol>
+    </div>
   </div>
 
   <header>
