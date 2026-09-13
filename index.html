@@ -114,17 +114,21 @@
             ${data.message ? `<span class="card-message">"${data.message}"</span>` : ""}
             <span class="card-date">${new Date(data.created_at).toLocaleDateString("pt-BR",{day:"2-digit",month:"short",year:"numeric"})}</span>
           </div>
-          <button class="comment-toggle-btn">
+          <div class="comment-actions">
             ${data.commentCount > 0
-              ? `💬 <strong>${data.commentCount}</strong> comentário${data.commentCount > 1 ? "s" : ""}`
-              : `✍️ Deixe seu comentário`}
-          </button>`;
+              ? `<button class="btn-view-comments">💬 <strong>${data.commentCount}</strong></button>`
+              : ``}
+            <button class="btn-add-comment">✍️ + Comentar</button>
+          </div>`;
         card.querySelector("img").addEventListener("click", () => openLightbox(data));
         if (isAdmin) {
           card.querySelector(".edit-btn").addEventListener("click", e => { e.stopPropagation(); openEditPanel(data); });
           card.querySelector(".del-btn").addEventListener("click",  e => { e.stopPropagation(); confirmDelete(data); });
         }
-        card.querySelector(".comment-toggle-btn").addEventListener("click", () => toggleComments(card, data.id));
+        const btnView = card.querySelector(".btn-view-comments");
+        const btnAdd  = card.querySelector(".btn-add-comment");
+        if (btnView) btnView.addEventListener("click", () => toggleComments(card, data.id, false));
+        btnAdd.addEventListener("click", () => toggleComments(card, data.id, true));
         grid.appendChild(card);
       });
     }
@@ -244,17 +248,23 @@
     }
 
     // ── comentários ───────────────────────────────
-    async function toggleComments(card, drawingId) {
+    async function toggleComments(card, drawingId, showForm) {
       let section = card.querySelector(".comments-section");
-      if (section) { section.remove(); return; }
+      // se já aberto com mesmo modo, fecha
+      if (section && section.dataset.mode === (showForm ? "form" : "view")) {
+        section.remove(); return;
+      }
+      // se aberto com modo diferente, remove e reabre
+      if (section) section.remove();
       section = document.createElement("div");
       section.className = "comments-section";
+      section.dataset.mode = showForm ? "form" : "view";
       section.innerHTML = `<div class="comments-loading">Carregando… 💬</div>`;
       card.appendChild(section);
-      await loadComments(section, drawingId, card);
+      await loadComments(section, drawingId, card, showForm);
     }
 
-    async function loadComments(section, drawingId, card) {
+    async function loadComments(section, drawingId, card, showForm) {
       const { data: comments } = await sb.from("comments").select("*").eq("drawing_id", drawingId).order("created_at", { ascending: true });
       let html = `<div class="comments-list">`;
       if (!comments || !comments.length) {
@@ -271,18 +281,19 @@
         });
       }
       html += `</div>
+        ${{showForm ? `
         <form class="comment-form">
           <input type="text" class="comment-author-input" placeholder="Seu nome 🌟" maxlength="40" required />
           <textarea class="comment-text-input" placeholder="Deixe um elogio para a artista! 💛" maxlength="300" required></textarea>
           <button type="submit" class="comment-submit-btn">Enviar comentário</button>
-        </form>`;
+        </form>` : ``}}`;
       section.innerHTML = html;
 
       if (isAdmin) {
         section.querySelectorAll(".del-comment-btn").forEach(btn => {
           btn.addEventListener("click", async () => {
             await sb.from("comments").delete().eq("id", btn.dataset.id);
-            await loadComments(section, drawingId, card);
+            await loadComments(section, drawingId, card, false);
             updateCommentBtn(card, drawingId);
           });
         });
@@ -296,17 +307,26 @@
         if (!author || !text) return;
         btn.disabled = true; btn.textContent = "Enviando…";
         await sb.from("comments").insert({ drawing_id: drawingId, author, text });
-        await loadComments(section, drawingId, card);
+        await loadComments(section, drawingId, card, false);
         updateCommentBtn(card, drawingId);
       });
     }
 
     async function updateCommentBtn(card, drawingId) {
       const { count } = await sb.from("comments").select("*", { count: "exact", head: true }).eq("drawing_id", drawingId);
-      const btn = card.querySelector(".comment-toggle-btn");
-      if (btn) btn.innerHTML = count > 0 ? `💬 <strong>${count}</strong> comentário${count > 1 ? "s" : ""}` : `✍️ Deixe seu comentário`;
+      const n = count || 0;
+      const actions = card.querySelector(".comment-actions");
+      if (actions) {
+        actions.innerHTML = n > 0
+          ? `<button class="btn-view-comments">💬 <strong>${n}</strong></button><button class="btn-add-comment">✍️ + Comentar</button>`
+          : `<button class="btn-add-comment">✍️ + Comentar</button>`;
+        const btnView = actions.querySelector(".btn-view-comments");
+        const btnAdd  = actions.querySelector(".btn-add-comment");
+        if (btnView) btnView.addEventListener("click", () => toggleComments(card, drawingId, false));
+        btnAdd.addEventListener("click", () => toggleComments(card, drawingId, true));
+      }
       const d = allDrawings.find(x => x.id === drawingId);
-      if (d) d.commentCount = count || 0;
+      if (d) d.commentCount = n;
     }
 
     // ── lightbox ──────────────────────────────────
@@ -444,9 +464,13 @@
     .card-title   { font-size: .95rem; color: var(--ink); font-weight: 700; }
     .card-message { font-size: .82rem; color: var(--ink2); font-style: italic; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .card-date    { font-size: .75rem; color: #bbb; font-weight: 600; }
-    .comment-toggle-btn { width: 100%; background: none; border: none; border-top: 1px solid #f0f0f0; padding: .55rem; font-family: var(--font-body); font-size: .82rem; font-weight: 700; color: var(--teal2); cursor: pointer; transition: background .15s; display: flex; align-items: center; justify-content: center; gap: 5px; }
-    .comment-toggle-btn:hover { background: #f0faf9; }
-    .comment-toggle-btn strong { font-size: .95rem; }
+    .comment-actions { display: flex; border-top: 1px solid #f0f0f0; }
+    .btn-view-comments, .btn-add-comment { flex: 1; background: none; border: none; padding: .55rem; font-family: var(--font-body); font-size: .82rem; font-weight: 700; cursor: pointer; transition: background .15s; display: flex; align-items: center; justify-content: center; gap: 4px; }
+    .btn-view-comments { color: var(--teal2); border-right: 1px solid #f0f0f0; }
+    .btn-view-comments:hover { background: #f0faf9; }
+    .btn-add-comment { color: var(--coral); }
+    .btn-add-comment:hover { background: #fff3f0; }
+    .btn-view-comments strong { font-size: .95rem; }
     .comments-section { padding: .8rem 1rem 1rem; border-top: 1px solid #f0f0f0; background: #fafafa; }
     .comments-loading { font-size: .85rem; color: #aaa; text-align: center; padding: .5rem; }
     .no-comments { font-size: .85rem; color: #aaa; text-align: center; padding: .4rem 0 .8rem; }
