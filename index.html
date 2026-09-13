@@ -36,6 +36,11 @@
       Cecília: { color: "#ba68c8", bg: "#f9f0ff", emoji: "🦋", photo: CECILIA_PHOTO, floatEmojis: ["🦋","🌸","⭐","🎀","💜"] }
     };
 
+    // escapa texto antes de inserir via innerHTML
+    function esc(s) {
+      return String(s ?? "").replace(/[&<>"']/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[ch]));
+    }
+
     // ── init ─────────────────────────────────────
     window.addEventListener("DOMContentLoaded", async () => {
       sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
@@ -102,16 +107,16 @@
         card.style.animationDelay = `${i * 0.06}s`;
         card.innerHTML = `
           <div class="card-img-wrap">
-            <img src="${data.url}" alt="${data.title}" loading="lazy" />
-            <div class="card-artist-tag" style="background:${p.color||'#aaa'}">${p.emoji||'🎨'} ${data.artist}</div>
+            <img src="${esc(data.url)}" alt="${esc(data.title)}" loading="lazy" />
+            <div class="card-artist-tag" style="background:${p.color||'#aaa'}">${p.emoji||'🎨'} ${esc(data.artist)}</div>
             ${isAdmin ? `<div class="card-admin-btns">
               <button class="card-btn edit-btn" title="Editar">✏️</button>
               <button class="card-btn del-btn" title="Excluir">🗑️</button>
             </div>` : ""}
           </div>
           <div class="card-info">
-            <span class="card-title">${data.title}</span>
-            ${data.message ? `<span class="card-message">"${data.message}"</span>` : ""}
+            <span class="card-title">${esc(data.title)}</span>
+            ${data.message ? `<span class="card-message">"${esc(data.message)}"</span>` : ""}
             <span class="card-date">${new Date(data.created_at).toLocaleDateString("pt-BR",{day:"2-digit",month:"short",year:"numeric"})}</span>
           </div>
           <div class="comment-actions">
@@ -273,20 +278,20 @@
         comments.forEach(c => {
           const date = new Date(c.created_at).toLocaleDateString("pt-BR",{day:"2-digit",month:"short"});
           html += `<div class="comment-item">
-            <span class="comment-author">${c.author}</span>
+            <span class="comment-author">${esc(c.author)}</span>
             <span class="comment-date">${date}</span>
-            <p class="comment-text">${c.text}</p>
-            ${isAdmin ? `<button class="del-comment-btn" data-id="${c.id}">✕</button>` : ""}
+            <p class="comment-text">${esc(c.text)}</p>
+            ${isAdmin ? `<button class="del-comment-btn" data-id="${esc(c.id)}">✕</button>` : ""}
           </div>`;
         });
       }
       html += `</div>
-        ${{showForm ? `
+        ${showForm ? `
         <form class="comment-form">
           <input type="text" class="comment-author-input" placeholder="Seu nome 🌟" maxlength="40" required />
           <textarea class="comment-text-input" placeholder="Deixe um elogio para a artista! 💛" maxlength="300" required></textarea>
           <button type="submit" class="comment-submit-btn">Enviar comentário</button>
-        </form>` : ``}}`;
+        </form>` : ``}`;
       section.innerHTML = html;
 
       if (isAdmin) {
@@ -299,7 +304,7 @@
         });
       }
 
-      section.querySelector(".comment-form").addEventListener("submit", async ev => {
+      section.querySelector(".comment-form")?.addEventListener("submit", async ev => {
         ev.preventDefault();
         const author = section.querySelector(".comment-author-input").value.trim();
         const text   = section.querySelector(".comment-text-input").value.trim();
