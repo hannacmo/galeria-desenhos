@@ -302,28 +302,34 @@
     }
 
     async function loadComments(section, drawingId, card, showForm) {
-      const { data: comments } = await sb.from("comments").select("*").eq("drawing_id", drawingId).order("created_at", { ascending: true });
-      let html = `<div class="comments-list">`;
-      if (!comments || !comments.length) {
-        html += `<p class="no-comments">Nenhum comentário ainda. Seja o primeiro! 🌟</p>`;
-      } else {
-        comments.forEach(c => {
-          const date = new Date(c.created_at).toLocaleDateString("pt-BR",{day:"2-digit",month:"short"});
-          html += `<div class="comment-item">
-            <span class="comment-author">${esc(c.author)}</span>
-            <span class="comment-date">${date}</span>
-            <p class="comment-text">${esc(c.text)}</p>
-            ${isAdmin ? `<button class="del-comment-btn" data-id="${esc(c.id)}">✕</button>` : ""}
-          </div>`;
-        });
-      }
-      html += `</div>
-        ${showForm ? `
+      // "+ Comentar" mostra só o formulário; a lista abre pelo número de comentários
+      section.dataset.mode = showForm ? "form" : "view";
+      let html;
+      if (showForm) {
+        html = `
         <form class="comment-form">
           <input type="text" class="comment-author-input" placeholder="Seu nome 🌟" maxlength="40" required />
           <textarea class="comment-text-input" placeholder="Deixe um elogio para a artista! 💛" maxlength="300" required></textarea>
           <button type="submit" class="comment-submit-btn">Enviar comentário</button>
-        </form>` : ``}`;
+        </form>`;
+      } else {
+        const { data: comments } = await sb.from("comments").select("*").eq("drawing_id", drawingId).order("created_at", { ascending: true });
+        html = `<div class="comments-list">`;
+        if (!comments || !comments.length) {
+          html += `<p class="no-comments">Nenhum comentário ainda. Seja o primeiro! 🌟</p>`;
+        } else {
+          comments.forEach(c => {
+            const date = new Date(c.created_at).toLocaleDateString("pt-BR",{day:"2-digit",month:"short"});
+            html += `<div class="comment-item">
+              <span class="comment-author">${esc(c.author)}</span>
+              <span class="comment-date">${date}</span>
+              <p class="comment-text">${esc(c.text)}</p>
+              ${isAdmin ? `<button class="del-comment-btn" data-id="${esc(c.id)}">✕</button>` : ""}
+            </div>`;
+          });
+        }
+        html += `</div>`;
+      }
       section.innerHTML = html;
 
       if (isAdmin) {
@@ -486,7 +492,7 @@
     .filter-btn[data-filter="all"].active    { background: var(--yellow); border-color: var(--yellow2); color: var(--ink); }
     .filter-btn[data-filter="Elisa"].active  { background: #fff3f0; border-color: var(--coral); color: var(--coral); }
     .filter-btn[data-filter="Cecília"].active{ background: #f9f0ff; border-color: var(--lilac); color: var(--lilac); }
-    #profile-box { display: none; align-items: center; gap: 1.6rem; max-width: 580px; margin: 0 auto 2rem; padding: 1.4rem 1.8rem; border-radius: var(--radius); border: 3px solid; position: relative; z-index: 1; animation: popIn .35s cubic-bezier(.34,1.56,.64,1); }
+    #profile-box { display: none; align-items: center; justify-content: center; gap: 1.6rem; max-width: 580px; width: calc(100% - 3rem); margin: 0 auto 2rem; padding: 1.4rem 1.8rem; border-radius: var(--radius); border: 3px solid; position: relative; z-index: 1; animation: popIn .35s cubic-bezier(.34,1.56,.64,1); }
     #profile-name { font-family: var(--font-display); font-size: 1.8rem; display: block; }
     .profile-circle-wrap { position: relative; width: 150px; height: 150px; flex-shrink: 0; }
     .profile-circle-img { width: 138px; height: 138px; border-radius: 50%; object-fit: cover; border: 5px solid var(--pcolor); box-shadow: 0 6px 24px rgba(0,0,0,.18); display: block; margin: 6px; }
@@ -659,7 +665,7 @@
     <button class="filter-btn" data-filter="Cecília">🦋 Cecília</button>
   </nav>
 
-  <div id="profile-box" style="margin:0 1.5rem 2rem;">
+  <div id="profile-box">
     <div id="profile-photo-wrap"></div>
     <div><span id="profile-name"></span></div>
   </div>
